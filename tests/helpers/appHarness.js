@@ -24,6 +24,7 @@ function bootApp() {
   });
 
   dom.window.eval(script);
+  dom.window.confirm = () => true;
 
   return {
     dom,
@@ -117,6 +118,15 @@ function dateInMonth(monthValue, day) {
 }
 
 function selectOptionByLabel(selectElement, matcher, missingLabel) {
+  if (selectElement.tagName === 'INPUT' && selectElement.list) {
+  const option = [...selectElement.list.options].find((item) => matcher(normalizeText(item.label || item.textContent || item.value)));
+    if (!option) {
+      throw new Error(missingLabel);
+    }
+    setValue(selectElement, option.value);
+    return;
+  }
+
   const option = [...selectElement.options].find((item) => matcher(normalizeText(item.textContent)));
   if (!option) {
     throw new Error(missingLabel);
@@ -228,6 +238,45 @@ function createProduct(ctx, { name, code = '', defaultPrice = 0 }) {
   submit(byId(ctx, 'product-form'));
 }
 
+function findProductRow(ctx, productName) {
+  const rows = getDataRows(ctx, 'product-table-body');
+  const row = rows.find((item) => normalizeText(item.children[0]?.textContent).includes(productName));
+  if (!row) {
+    throw new Error(`Không tìm thấy sản phẩm ${productName} trong bảng`);
+  }
+
+  return row;
+}
+
+function editProduct(ctx, { currentName, nextName, code = '', defaultPrice = 0, note = '' }) {
+  openTab(ctx, 'products');
+  const row = findProductRow(ctx, currentName);
+  const editButton = row.querySelector('.edit-product-btn');
+  if (!editButton) {
+    throw new Error(`Không có nút sửa cho sản phẩm ${currentName}`);
+  }
+
+  click(editButton);
+  setValue(byId(ctx, 'product-name'), nextName);
+  setValue(byId(ctx, 'product-code'), code);
+  setValue(byId(ctx, 'product-default-price'), String(defaultPrice));
+  setValue(byId(ctx, 'product-note'), note);
+  submit(byId(ctx, 'product-form'));
+  return textOf(byId(ctx, 'product-form-result'));
+}
+
+function deleteProduct(ctx, productName) {
+  openTab(ctx, 'products');
+  const row = findProductRow(ctx, productName);
+  const deleteButton = row.querySelector('.delete-product-btn');
+  if (!deleteButton) {
+    throw new Error(`Không có nút xoá cho sản phẩm ${productName}`);
+  }
+
+  click(deleteButton);
+  return textOf(byId(ctx, 'product-form-result'));
+}
+
 function addVisit(ctx, { customerName, productName, date, revenue }) {
   openTab(ctx, 'visits');
 
@@ -247,6 +296,65 @@ function addVisit(ctx, { customerName, productName, date, revenue }) {
   setValue(byId(ctx, 'visit-revenue'), String(revenue));
   submit(byId(ctx, 'visit-form'));
 
+  return textOf(byId(ctx, 'visit-result'));
+}
+
+function findVisitRow(ctx, customerName) {
+  const rows = getDataRows(ctx, 'visit-table-body');
+  const row = rows.find((item) => normalizeText(item.textContent).includes(customerName));
+  if (!row) {
+    throw new Error(`Không tìm thấy giao dịch voucher của khách ${customerName}`);
+  }
+
+  return row;
+}
+
+function editVisit(ctx, { customerName, productName, date, revenue }) {
+  openTab(ctx, 'visits');
+  const row = findVisitRow(ctx, customerName);
+  const editButton = row.querySelector('.edit-visit-btn');
+  if (!editButton) {
+    throw new Error(`Không có nút sửa cho giao dịch voucher của khách ${customerName}`);
+  }
+
+  click(editButton);
+
+  if (customerName) {
+    selectOptionByLabel(
+      byId(ctx, 'visit-customer'),
+      (label) => label.includes(customerName),
+      `Không tìm thấy khách hàng ${customerName} trong form tích điểm`,
+    );
+  }
+
+  if (productName) {
+    selectOptionByLabel(
+      byId(ctx, 'visit-product'),
+      (label) => label.includes(productName),
+      `Không tìm thấy sản phẩm ${productName} trong form tích điểm`,
+    );
+  }
+
+  if (date) {
+    setValue(byId(ctx, 'visit-date'), date);
+  }
+  if (typeof revenue !== 'undefined') {
+    setValue(byId(ctx, 'visit-revenue'), String(revenue));
+  }
+
+  submit(byId(ctx, 'visit-form'));
+  return textOf(byId(ctx, 'visit-result'));
+}
+
+function deleteVisit(ctx, customerName) {
+  openTab(ctx, 'visits');
+  const row = findVisitRow(ctx, customerName);
+  const deleteButton = row.querySelector('.delete-visit-btn');
+  if (!deleteButton) {
+    throw new Error(`Không có nút xoá cho giao dịch voucher của khách ${customerName}`);
+  }
+
+  click(deleteButton);
   return textOf(byId(ctx, 'visit-result'));
 }
 
@@ -282,6 +390,75 @@ function addReferral(ctx, { referrerUsername, referredCustomerName, productName,
   return textOf(byId(ctx, 'referral-result'));
 }
 
+function findReferralRow(ctx, referredCustomerName) {
+  const rows = getDataRows(ctx, 'referral-table-body');
+  const row = rows.find((item) => normalizeText(item.textContent).includes(referredCustomerName));
+  if (!row) {
+    throw new Error(`Không tìm thấy giao dịch hoa hồng của khách ${referredCustomerName}`);
+  }
+
+  return row;
+}
+
+function editReferral(ctx, { referrerUsername = '', referredCustomerName, productName, date, revenue }) {
+  openTab(ctx, 'referrals');
+  const row = findReferralRow(ctx, referredCustomerName);
+  const editButton = row.querySelector('.edit-referral-btn');
+  if (!editButton) {
+    throw new Error(`Không có nút sửa cho giao dịch hoa hồng của khách ${referredCustomerName}`);
+  }
+
+  click(editButton);
+
+  if (referrerUsername) {
+    selectOptionByLabel(
+      byId(ctx, 'referrer-user'),
+      (label) => label.includes(`(${referrerUsername})`) || label.includes(referrerUsername),
+      `Không tìm thấy người giới thiệu ${referrerUsername}`,
+    );
+  } else {
+    setValue(byId(ctx, 'referrer-user'), '');
+  }
+
+  if (referredCustomerName) {
+    selectOptionByLabel(
+      byId(ctx, 'referred-customer'),
+      (label) => label.includes(referredCustomerName),
+      `Không tìm thấy khách được giới thiệu ${referredCustomerName}`,
+    );
+  }
+
+  if (productName) {
+    selectOptionByLabel(
+      byId(ctx, 'referral-product'),
+      (label) => label.includes(productName),
+      `Không tìm thấy sản phẩm ${productName} trong form hoa hồng`,
+    );
+  }
+
+  if (date) {
+    setValue(byId(ctx, 'referral-date'), date);
+  }
+  if (typeof revenue !== 'undefined') {
+    setValue(byId(ctx, 'referral-revenue'), String(revenue));
+  }
+
+  submit(byId(ctx, 'referral-form'));
+  return textOf(byId(ctx, 'referral-result'));
+}
+
+function deleteReferral(ctx, referredCustomerName) {
+  openTab(ctx, 'referrals');
+  const row = findReferralRow(ctx, referredCustomerName);
+  const deleteButton = row.querySelector('.delete-referral-btn');
+  if (!deleteButton) {
+    throw new Error(`Không có nút xoá cho giao dịch hoa hồng của khách ${referredCustomerName}`);
+  }
+
+  click(deleteButton);
+  return textOf(byId(ctx, 'referral-result'));
+}
+
 function getDataRows(ctx, tbodyId) {
   const tbody = byId(ctx, tbodyId);
 
@@ -303,8 +480,14 @@ module.exports = {
   createMember,
   createProduct,
   deleteCustomer,
+  deleteProduct,
+  deleteReferral,
+  deleteVisit,
   dateInMonth,
   editCustomer,
+  editProduct,
+  editReferral,
+  editVisit,
   getDataRows,
   getRowTexts,
   getVisibleTabIds,
@@ -314,6 +497,7 @@ module.exports = {
   normalizeText,
   openTab,
   setValue,
+  submit,
   updateMemberPermissions,
   textOf,
 };

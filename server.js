@@ -7,21 +7,35 @@ const morgan = require("morgan");
 
 const {
   DEFAULT_ADMIN_USERNAME,
+  DATA_FILE,
   addCustomer,
+  addPersistListener,
   deleteCustomer,
   importCustomers,
   addProduct,
+  updateProduct,
+  deleteProduct,
   addReferral,
+  updateReferral,
+  deleteReferral,
   addVisit,
+  updateVisit,
+  deleteVisit,
   createMemberAccount,
+  deleteMemberAccount,
+  resetMemberPassword,
+  changeCurrentUserPassword,
   findUserById,
   findUserByUsername,
   getBootstrapForUser,
+  hasFeaturePermission,
+  purgeDataByDateRange,
   safeUser,
   updateCustomer,
   updateMemberPermissions,
   verifyPassword,
 } = require("./server/dataStore");
+const { createBackupManager } = require("./server/backupManager");
 
 const app = express();
 
@@ -31,6 +45,15 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-session-secret
 const COOKIE_NAME = "aha_session";
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
 const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
+
+const backupManager = createBackupManager({
+  dataFile: DATA_FILE,
+  logger: console,
+});
+addPersistListener((payload) => {
+  backupManager.notifyDataChanged(payload);
+});
+backupManager.start();
 
 if (!process.env.SESSION_SECRET) {
   console.warn("[AHA] SESSION_SECRET đang dùng mặc định. Hãy đặt SESSION_SECRET mạnh trước khi triển khai.");
@@ -134,6 +157,11 @@ app.post("/api/auth/login", (req, res) => {
       return;
     }
 
+    if (user.role === "member" && user.locked) {
+      res.status(403).json({ message: "Tài khoản đã bị khoá. Vui lòng liên hệ quản trị viên." });
+      return;
+    }
+
     setSessionCookie(res, user.id);
     res.json({ user: safeUser(user) });
   } catch (error) {
@@ -173,7 +201,7 @@ app.post("/api/customers/import", requireAuth, (req, res) => {
     const payload = importCustomers(req.user, req.body?.rows);
     res.status(201).json(payload);
   } catch (error) {
-    sendApiError(res, error, "Không thể import khách hàng từ CSV.");
+    sendApiError(res, error, "Không thể nhập khách hàng từ tệp dữ liệu phân tách bằng dấu phẩy.");
   }
 });
 
@@ -204,6 +232,24 @@ app.post("/api/products", requireAuth, (req, res) => {
   }
 });
 
+app.patch("/api/products/:id", requireAuth, (req, res) => {
+  try {
+    const product = updateProduct(req.user, req.params.id, req.body);
+    res.json({ product });
+  } catch (error) {
+    sendApiError(res, error, "Không thể cập nhật sản phẩm/dịch vụ.");
+  }
+});
+
+app.delete("/api/products/:id", requireAuth, (req, res) => {
+  try {
+    const deleted = deleteProduct(req.user, req.params.id);
+    res.json(deleted);
+  } catch (error) {
+    sendApiError(res, error, "Không thể xoá sản phẩm/dịch vụ.");
+  }
+});
+
 app.post("/api/visits", requireAuth, (req, res) => {
   try {
     const payload = addVisit(req.user, req.body);
@@ -213,12 +259,66 @@ app.post("/api/visits", requireAuth, (req, res) => {
   }
 });
 
+app.patch("/api/visits/:id", requireAuth, (req, res) => {
+  try {
+    const payload = updateVisit(req.user, req.params.id, req.body);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể cập nhật tích điểm voucher.");
+  }
+});
+
+app.delete("/api/visits/:id", requireAuth, (req, res) => {
+  try {
+    const deleted = deleteVisit(req.user, req.params.id);
+    res.json(deleted);
+  } catch (error) {
+    sendApiError(res, error, "Không thể xoá giao dịch tích điểm voucher.");
+  }
+});
+
 app.post("/api/referrals", requireAuth, (req, res) => {
   try {
     const payload = addReferral(req.user, req.body);
     res.status(201).json(payload);
   } catch (error) {
     sendApiError(res, error, "Không thể ghi nhận hoa hồng giới thiệu.");
+  }
+});
+
+app.patch("/api/referrals/:id", requireAuth, (req, res) => {
+  try {
+    const payload = updateReferral(req.user, req.params.id, req.body);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể cập nhật hoa hồng giới thiệu.");
+  }
+});
+
+app.delete("/api/referrals/:id", requireAuth, (req, res) => {
+  try {
+    const deleted = deleteReferral(req.user, req.params.id);
+    res.json(deleted);
+  } catch (error) {
+    sendApiError(res, error, "Không thể xoá giao dịch hoa hồng giới thiệu.");
+  }
+});
+
+app.post("/api/data-cleanup/range", requireAuth, (req, res) => {
+  try {
+    const payload = purgeDataByDateRange(req.user, req.body);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể xoá dữ liệu theo khoảng thời gian.");
+  }
+});
+
+app.post("/api/account/change-password", requireAuth, (req, res) => {
+  try {
+    const payload = changeCurrentUserPassword(req.user, req.body);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể cập nhật mật khẩu.");
   }
 });
 
@@ -237,6 +337,51 @@ app.patch("/api/users/:id/permissions", requireAuth, (req, res) => {
     res.json({ user });
   } catch (error) {
     sendApiError(res, error, "Không thể cập nhật quyền tài khoản.");
+  }
+});
+
+app.patch("/api/users/:id/password", requireAuth, (req, res) => {
+  try {
+    const payload = resetMemberPassword(req.user, req.params.id, req.body?.nextPassword);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể đặt lại mật khẩu thành viên.");
+  }
+});
+
+app.delete("/api/users/:id", requireAuth, (req, res) => {
+  try {
+    const payload = deleteMemberAccount(req.user, req.params.id);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể xoá tài khoản thành viên.");
+  }
+});
+
+app.get("/api/backup/status", requireAuth, (req, res) => {
+  try {
+    if (!hasFeaturePermission(req.user, "backupData")) {
+      res.status(403).json({ message: "Bạn không có quyền xem trạng thái sao lưu dữ liệu." });
+      return;
+    }
+
+    res.json({ status: backupManager.getStatus() });
+  } catch (error) {
+    sendApiError(res, error, "Không thể đọc trạng thái sao lưu dữ liệu.");
+  }
+});
+
+app.post("/api/backup/run", requireAuth, async (req, res) => {
+  try {
+    if (!hasFeaturePermission(req.user, "backupData")) {
+      res.status(403).json({ message: "Bạn không có quyền yêu cầu sao lưu dữ liệu." });
+      return;
+    }
+
+    const status = await backupManager.requestRun("manual");
+    res.status(202).json({ ok: true, status });
+  } catch (error) {
+    sendApiError(res, error, "Không thể yêu cầu sao lưu dữ liệu ngay.");
   }
 });
 
@@ -266,7 +411,7 @@ app.get("/samples/customers-template.csv", (_req, res) => {
 });
 
 app.use("/api", (_req, res) => {
-  res.status(404).json({ message: "API endpoint không tồn tại." });
+  res.status(404).json({ message: "Đường dẫn giao tiếp dữ liệu không tồn tại." });
 });
 
 app.use((_req, res) => {
@@ -275,6 +420,16 @@ app.use((_req, res) => {
 
 app.listen(PORT, HOST, () => {
   console.log(`[AHA] Server running at http://${HOST}:${PORT}`);
-  console.log(`[AHA] Admin mặc định: ${DEFAULT_ADMIN_USERNAME}`);
+  console.log(`[AHA] Tài khoản quản trị viên mặc định: ${DEFAULT_ADMIN_USERNAME}`);
   console.log("[AHA] Hãy đổi AHA_ADMIN_PASSWORD trong .env trước khi chạy production.");
+});
+
+process.on("SIGINT", () => {
+  backupManager.stop();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  backupManager.stop();
+  process.exit(0);
 });

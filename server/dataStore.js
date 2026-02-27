@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 
 const DATA_DIR = path.join(__dirname, "..", "data");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
+const persistListeners = [];
 
 const DEFAULT_ADMIN_USERNAME = process.env.AHA_ADMIN_USERNAME || "admin";
 const DEFAULT_ADMIN_PASSWORD = process.env.AHA_ADMIN_PASSWORD || "admin123";
@@ -12,9 +13,18 @@ const ADMIN_PERMISSIONS = {
   customers: true,
   customerEdit: true,
   products: true,
+  productsEdit: true,
+  productsDelete: true,
   visits: true,
+  visitsEdit: true,
+  visitsDelete: true,
   referrals: true,
+  referralsEdit: true,
+  referralsDelete: true,
   reports: true,
+  dataCleanup: true,
+  backupData: true,
+  changePassword: true,
 };
 
 function httpError(status, message) {
@@ -29,6 +39,20 @@ function createId(prefix) {
 
 function monthOf(dateValue) {
   return typeof dateValue === "string" ? dateValue.slice(0, 7) : "";
+}
+
+function dayOf(dateValue) {
+  if (typeof dateValue !== "string" || dateValue.length < 10) return "";
+  return dateValue.slice(0, 10);
+}
+
+function isValidDay(dayValue) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dayValue);
+}
+
+function isDayInRange(dayValue, fromDate, toDate) {
+  if (!isValidDay(dayValue)) return false;
+  return dayValue >= fromDate && dayValue <= toDate;
 }
 
 function getRateByOccurrence(occurrence) {
@@ -47,9 +71,18 @@ function defaultMemberPermissions() {
     customers: false,
     customerEdit: false,
     products: false,
+    productsEdit: false,
+    productsDelete: false,
     visits: false,
+    visitsEdit: false,
+    visitsDelete: false,
     referrals: false,
+    referralsEdit: false,
+    referralsDelete: false,
     reports: true,
+    dataCleanup: false,
+    backupData: false,
+    changePassword: false,
   };
 }
 
@@ -61,9 +94,18 @@ function buildMemberPermissions(rawPermissions) {
     customers: Boolean(source.customers ?? defaults.customers),
     customerEdit: Boolean(source.customerEdit ?? defaults.customerEdit),
     products: Boolean(source.products ?? defaults.products),
+    productsEdit: Boolean(source.productsEdit ?? defaults.productsEdit),
+    productsDelete: Boolean(source.productsDelete ?? defaults.productsDelete),
     visits: Boolean(source.visits ?? defaults.visits),
+    visitsEdit: Boolean(source.visitsEdit ?? defaults.visitsEdit),
+    visitsDelete: Boolean(source.visitsDelete ?? defaults.visitsDelete),
     referrals: Boolean(source.referrals ?? defaults.referrals),
+    referralsEdit: Boolean(source.referralsEdit ?? defaults.referralsEdit),
+    referralsDelete: Boolean(source.referralsDelete ?? defaults.referralsDelete),
     reports: Boolean(source.reports ?? defaults.reports),
+    dataCleanup: Boolean(source.dataCleanup ?? defaults.dataCleanup),
+    backupData: Boolean(source.backupData ?? defaults.backupData),
+    changePassword: Boolean(source.changePassword ?? defaults.changePassword),
   };
 }
 
@@ -205,6 +247,7 @@ function normalizeUser(user) {
     username,
     fullName: fullName || (role === "admin" ? "Quản trị Aha" : "Thành viên"),
     role,
+    locked: Boolean(user?.locked) && role !== "admin",
     permissions: role === "admin" ? { ...ADMIN_PERMISSIONS } : buildMemberPermissions(user?.permissions),
     passwordHash,
     createdAt: typeof user?.createdAt === "string" ? user.createdAt : new Date().toISOString(),
@@ -221,6 +264,7 @@ function ensureAdminAccount(state) {
       username: DEFAULT_ADMIN_USERNAME,
       fullName: "Quản trị Aha",
       role: "admin",
+      locked: false,
       permissions: { ...ADMIN_PERMISSIONS },
       passwordHash: bcrypt.hashSync(DEFAULT_ADMIN_PASSWORD, 10),
       createdAt: new Date().toISOString(),
@@ -234,6 +278,7 @@ function ensureAdminAccount(state) {
       ...user,
       username: user.username || DEFAULT_ADMIN_USERNAME,
       passwordHash: user.passwordHash || bcrypt.hashSync(DEFAULT_ADMIN_PASSWORD, 10),
+      locked: false,
       permissions: { ...ADMIN_PERMISSIONS },
     };
   });
@@ -287,6 +332,31 @@ writeStateToDisk(state);
 
 function persist() {
   writeStateToDisk(state);
+
+  if (persistListeners.length > 0) {
+    persistListeners.forEach((listener) => {
+      try {
+        listener({
+          dataFile: DATA_FILE,
+          changedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.error("[AHA] Persist listener failed:", error);
+      }
+    });
+  }
+}
+
+function addPersistListener(listener) {
+  if (typeof listener !== "function") return () => {};
+  persistListeners.push(listener);
+
+  return () => {
+    const index = persistListeners.indexOf(listener);
+    if (index >= 0) {
+      persistListeners.splice(index, 1);
+    }
+  };
 }
 
 function clone(value) {
@@ -299,6 +369,7 @@ function safeUser(user) {
     fullName: user.fullName,
     username: user.username,
     role: user.role,
+    locked: Boolean(user.locked),
     permissions: user.role === "admin" ? { ...ADMIN_PERMISSIONS } : buildMemberPermissions(user.permissions),
     createdAt: user.createdAt,
   };
@@ -510,7 +581,7 @@ function updateCustomer(requestUser, customerId, input) {
 
 function deleteCustomer(requestUser, customerId) {
   if (requestUser.role !== "admin") {
-    throw httpError(403, "Chỉ admin mới có quyền xoá khách hàng.");
+    throw httpError(403, "Chỉ quản trị viên mới có quyền xoá khách hàng.");
   }
 
   const customer = state.customers.find((item) => item.id === customerId);
@@ -566,6 +637,65 @@ function addProduct(requestUser, input) {
   return clone(product);
 }
 
+function updateProduct(requestUser, productId, input) {
+  assertFeaturePermission(requestUser, "products");
+  assertFeaturePermission(requestUser, "productsEdit");
+
+  const product = state.products.find((item) => item.id === productId);
+  if (!product) {
+    throw httpError(404, "Không tìm thấy sản phẩm/dịch vụ cần chỉnh sửa.");
+  }
+
+  const name = typeof input?.name === "string" ? input.name.trim() : "";
+  const code = typeof input?.code === "string" ? input.code.trim() : "";
+  const defaultPrice = Number(input?.defaultPrice || 0);
+  const note = typeof input?.note === "string" ? input.note : "";
+
+  if (!name) {
+    throw httpError(400, "Vui lòng nhập tên sản phẩm / dịch vụ.");
+  }
+
+  if (!Number.isFinite(defaultPrice) || defaultPrice < 0) {
+    throw httpError(400, "Giá gợi ý không hợp lệ.");
+  }
+
+  product.name = name;
+  product.code = code;
+  product.defaultPrice = defaultPrice;
+  product.note = note;
+  persist();
+
+  return clone(product);
+}
+
+function deleteProduct(requestUser, productId) {
+  assertFeaturePermission(requestUser, "products");
+  assertFeaturePermission(requestUser, "productsDelete");
+
+  const product = state.products.find((item) => item.id === productId);
+  if (!product) {
+    throw httpError(404, "Không tìm thấy sản phẩm/dịch vụ cần xoá.");
+  }
+
+  const usedInVisits = state.visits.filter((item) => item.productId === productId).length;
+  const usedInReferrals = state.referrals.filter((item) => item.productId === productId).length;
+  if (usedInVisits > 0 || usedInReferrals > 0) {
+    throw httpError(
+      409,
+      `Không thể xoá vì sản phẩm/dịch vụ đang được dùng ở ${usedInVisits} lượt voucher và ${usedInReferrals} lượt hoa hồng.`,
+    );
+  }
+
+  state.products = state.products.filter((item) => item.id !== productId);
+  persist();
+
+  return {
+    deletedProductId: productId,
+    deletedProductName: product.name,
+    products: clone(state.products),
+  };
+}
+
 function addVisit(requestUser, input) {
   assertFeaturePermission(requestUser, "visits");
 
@@ -608,6 +738,64 @@ function addVisit(requestUser, input) {
   };
 }
 
+function updateVisit(requestUser, visitId, input) {
+  assertFeaturePermission(requestUser, "visits");
+  assertFeaturePermission(requestUser, "visitsEdit");
+
+  const visit = state.visits.find((item) => item.id === visitId);
+  if (!visit) {
+    throw httpError(404, "Không tìm thấy giao dịch tích điểm cần chỉnh sửa.");
+  }
+
+  const customerId = typeof input?.customerId === "string" ? input.customerId : "";
+  const productId = typeof input?.productId === "string" ? input.productId : "";
+  const date = typeof input?.date === "string" ? input.date : "";
+  const revenue = Number(input?.revenue || 0);
+
+  if (!customerId || !productId || !date || revenue <= 0) {
+    throw httpError(400, "Vui lòng nhập đủ khách hàng, sản phẩm/dịch vụ, ngày và doanh thu > 0.");
+  }
+
+  const hasCustomer = state.customers.some((item) => item.id === customerId);
+  const hasProduct = state.products.some((item) => item.id === productId);
+  if (!hasCustomer || !hasProduct) {
+    throw httpError(400, "Khách hàng hoặc sản phẩm/dịch vụ không hợp lệ.");
+  }
+
+  visit.customerId = customerId;
+  visit.productId = productId;
+  visit.date = date;
+  visit.revenue = revenue;
+
+  normalizeAllRecords(state);
+  persist();
+
+  const savedVisit = state.visits.find((item) => item.id === visitId) || visit;
+  return {
+    visit: clone(savedVisit),
+    visits: clone(state.visits),
+  };
+}
+
+function deleteVisit(requestUser, visitId) {
+  assertFeaturePermission(requestUser, "visits");
+  assertFeaturePermission(requestUser, "visitsDelete");
+
+  const visit = state.visits.find((item) => item.id === visitId);
+  if (!visit) {
+    throw httpError(404, "Không tìm thấy giao dịch tích điểm cần xoá.");
+  }
+
+  state.visits = state.visits.filter((item) => item.id !== visitId);
+  normalizeAllRecords(state);
+  persist();
+
+  return {
+    deletedVisitId: visitId,
+    visits: clone(state.visits),
+  };
+}
+
 function addReferral(requestUser, input) {
   assertFeaturePermission(requestUser, "referrals");
 
@@ -631,7 +819,7 @@ function addReferral(requestUser, input) {
   if (referrerId) {
     const referrer = state.users.find((item) => item.id === referrerId && item.role === "member");
     if (!referrer) {
-      throw httpError(400, "Người giới thiệu phải là tài khoản thành viên do admin tạo.");
+      throw httpError(400, "Người giới thiệu phải là tài khoản thành viên do quản trị viên tạo.");
     }
   }
 
@@ -664,6 +852,226 @@ function addReferral(requestUser, input) {
   };
 }
 
+function updateReferral(requestUser, referralId, input) {
+  assertFeaturePermission(requestUser, "referrals");
+  assertFeaturePermission(requestUser, "referralsEdit");
+
+  const referral = state.referrals.find((item) => item.id === referralId);
+  if (!referral) {
+    throw httpError(404, "Không tìm thấy giao dịch hoa hồng cần chỉnh sửa.");
+  }
+
+  const referrerId = typeof input?.referrerId === "string" ? input.referrerId : "";
+  const referredCustomerId = typeof input?.referredCustomerId === "string" ? input.referredCustomerId : "";
+  const productId = typeof input?.productId === "string" ? input.productId : "";
+  const date = typeof input?.date === "string" ? input.date : "";
+  const revenue = Number(input?.revenue || 0);
+
+  if (!referredCustomerId || !productId || !date || revenue <= 0) {
+    throw httpError(400, "Vui lòng nhập đủ khách được giới thiệu, sản phẩm/dịch vụ, ngày và doanh thu > 0.");
+  }
+
+  const hasCustomer = state.customers.some((item) => item.id === referredCustomerId);
+  const hasProduct = state.products.some((item) => item.id === productId);
+
+  if (!hasCustomer || !hasProduct) {
+    throw httpError(400, "Khách hàng hoặc sản phẩm/dịch vụ không hợp lệ.");
+  }
+
+  if (referrerId) {
+    const referrer = state.users.find((item) => item.id === referrerId && item.role === "member");
+    if (!referrer) {
+      throw httpError(400, "Người giới thiệu phải là tài khoản thành viên do quản trị viên tạo.");
+    }
+  }
+
+  referral.referrerId = referrerId || "";
+  referral.referredCustomerId = referredCustomerId;
+  referral.referredName = "";
+  referral.productId = productId;
+  referral.date = date;
+  referral.revenue = revenue;
+
+  normalizeAllRecords(state);
+  persist();
+
+  const savedReferral = state.referrals.find((item) => item.id === referralId) || referral;
+  return {
+    referral: clone(savedReferral),
+    referrals: clone(state.referrals),
+  };
+}
+
+function deleteReferral(requestUser, referralId) {
+  assertFeaturePermission(requestUser, "referrals");
+  assertFeaturePermission(requestUser, "referralsDelete");
+
+  const referral = state.referrals.find((item) => item.id === referralId);
+  if (!referral) {
+    throw httpError(404, "Không tìm thấy giao dịch hoa hồng cần xoá.");
+  }
+
+  state.referrals = state.referrals.filter((item) => item.id !== referralId);
+  normalizeAllRecords(state);
+  persist();
+
+  return {
+    deletedReferralId: referralId,
+    referrals: clone(state.referrals),
+  };
+}
+
+function purgeDataByDateRange(requestUser, input) {
+  assertFeaturePermission(requestUser, "dataCleanup");
+
+  const fromDate = typeof input?.fromDate === "string" ? input.fromDate : "";
+  const toDate = typeof input?.toDate === "string" ? input.toDate : "";
+
+  if (!isValidDay(fromDate) || !isValidDay(toDate)) {
+    throw httpError(400, "Vui lòng chọn đầy đủ ngày bắt đầu và ngày kết thúc hợp lệ.");
+  }
+
+  if (fromDate > toDate) {
+    throw httpError(400, "Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc.");
+  }
+
+  const rawScopes = input?.scopes && typeof input.scopes === "object" ? input.scopes : {};
+  const scopes = {
+    customers: rawScopes.customers !== false,
+    products: rawScopes.products !== false,
+    visits: rawScopes.visits !== false,
+    referrals: rawScopes.referrals !== false,
+    members: Boolean(rawScopes.members),
+  };
+
+  if (!scopes.customers && !scopes.products && !scopes.visits && !scopes.referrals && !scopes.members) {
+    throw httpError(400, "Vui lòng chọn ít nhất một nhóm dữ liệu để xoá.");
+  }
+
+  const summary = {
+    fromDate,
+    toDate,
+    removedCustomers: 0,
+    removedProducts: 0,
+    removedVisits: 0,
+    removedReferrals: 0,
+    removedMembers: 0,
+  };
+
+  if (scopes.members) {
+    const removableMemberIds = state.users
+      .filter(
+        (item) =>
+          item.role === "member" &&
+          item.id !== requestUser.id &&
+          isDayInRange(dayOf(item.createdAt), fromDate, toDate),
+      )
+      .map((item) => item.id);
+
+    if (removableMemberIds.length > 0) {
+      const memberIdSet = new Set(removableMemberIds);
+      summary.removedMembers = removableMemberIds.length;
+      state.users = state.users.filter((item) => !memberIdSet.has(item.id));
+      const beforeReferrals = state.referrals.length;
+      state.referrals = state.referrals.filter((item) => !memberIdSet.has(item.referrerId));
+      summary.removedReferrals += beforeReferrals - state.referrals.length;
+    }
+  }
+
+  if (scopes.customers) {
+    const removableCustomerIds = state.customers
+      .filter((item) => isDayInRange(dayOf(item.createdAt), fromDate, toDate))
+      .map((item) => item.id);
+
+    if (removableCustomerIds.length > 0) {
+      const customerIdSet = new Set(removableCustomerIds);
+      summary.removedCustomers = removableCustomerIds.length;
+      state.customers = state.customers.filter((item) => !customerIdSet.has(item.id));
+
+      const beforeVisits = state.visits.length;
+      const beforeReferrals = state.referrals.length;
+      state.visits = state.visits.filter((item) => !customerIdSet.has(item.customerId));
+      state.referrals = state.referrals.filter((item) => !customerIdSet.has(item.referredCustomerId));
+      summary.removedVisits += beforeVisits - state.visits.length;
+      summary.removedReferrals += beforeReferrals - state.referrals.length;
+    }
+  }
+
+  if (scopes.products) {
+    const removableProductIds = state.products
+      .filter((item) => isDayInRange(dayOf(item.createdAt), fromDate, toDate))
+      .map((item) => item.id);
+
+    if (removableProductIds.length > 0) {
+      const productIdSet = new Set(removableProductIds);
+      summary.removedProducts = removableProductIds.length;
+      state.products = state.products.filter((item) => !productIdSet.has(item.id));
+
+      const beforeVisits = state.visits.length;
+      const beforeReferrals = state.referrals.length;
+      state.visits = state.visits.filter((item) => !productIdSet.has(item.productId));
+      state.referrals = state.referrals.filter((item) => !productIdSet.has(item.productId));
+      summary.removedVisits += beforeVisits - state.visits.length;
+      summary.removedReferrals += beforeReferrals - state.referrals.length;
+    }
+  }
+
+  if (scopes.visits) {
+    const beforeVisits = state.visits.length;
+    state.visits = state.visits.filter((item) => !isDayInRange(dayOf(item.date), fromDate, toDate));
+    summary.removedVisits += beforeVisits - state.visits.length;
+  }
+
+  if (scopes.referrals) {
+    const beforeReferrals = state.referrals.length;
+    state.referrals = state.referrals.filter((item) => !isDayInRange(dayOf(item.date), fromDate, toDate));
+    summary.removedReferrals += beforeReferrals - state.referrals.length;
+  }
+
+  normalizeAllRecords(state);
+  persist();
+
+  return {
+    summary,
+    remaining: {
+      customers: state.customers.length,
+      products: state.products.length,
+      visits: state.visits.length,
+      referrals: state.referrals.length,
+      members: state.users.filter((item) => item.role === "member").length,
+    },
+  };
+}
+
+function changeCurrentUserPassword(requestUser, input) {
+  assertFeaturePermission(requestUser, "changePassword");
+
+  const currentPassword = typeof input?.currentPassword === "string" ? input.currentPassword : "";
+  const nextPassword = typeof input?.nextPassword === "string" ? input.nextPassword : "";
+
+  if (!currentPassword || !nextPassword) {
+    throw httpError(400, "Vui lòng nhập đầy đủ mật khẩu hiện tại và mật khẩu mới.");
+  }
+
+  if (nextPassword.length < 6) {
+    throw httpError(400, "Mật khẩu mới tối thiểu 6 ký tự.");
+  }
+
+  if (!bcrypt.compareSync(currentPassword, requestUser.passwordHash)) {
+    throw httpError(401, "Mật khẩu hiện tại không đúng.");
+  }
+
+  const user = state.users.find((item) => item.id === requestUser.id);
+  if (!user) {
+    throw httpError(404, "Không tìm thấy tài khoản cần đổi mật khẩu.");
+  }
+
+  user.passwordHash = bcrypt.hashSync(nextPassword, 10);
+  persist();
+
+  return { updatedUserId: user.id };
+}
+
 function createMemberAccount(requestUser, input) {
   assertFeaturePermission(requestUser, "manageUsers");
 
@@ -676,8 +1084,8 @@ function createMemberAccount(requestUser, input) {
     throw httpError(400, "Vui lòng nhập đầy đủ họ tên, tên đăng nhập và mật khẩu.");
   }
 
-  if (!/^[a-zA-Z0-9._-]+$/.test(username)) {
-    throw httpError(400, "Tên đăng nhập chỉ chứa chữ, số và các ký tự . _ -.");
+  if (!/^[0-9]{8,15}$/.test(username)) {
+    throw httpError(400, "Tên đăng nhập phải là số điện thoại 8-15 chữ số.");
   }
 
   if (password.length < 6) {
@@ -714,9 +1122,50 @@ function updateMemberPermissions(requestUser, memberId, permissionsInput) {
   }
 
   member.permissions = buildMemberPermissions(permissionsInput);
+  if (typeof permissionsInput?.locked !== "undefined") {
+    member.locked = Boolean(permissionsInput.locked);
+  }
   persist();
 
   return clone(safeUser(member));
+}
+
+function deleteMemberAccount(requestUser, memberId) {
+  assertFeaturePermission(requestUser, "manageUsers");
+
+  const member = state.users.find((item) => item.id === memberId && item.role === "member");
+  if (!member) {
+    throw httpError(404, "Không tìm thấy tài khoản thành viên.");
+  }
+
+  state.users = state.users.filter((item) => item.id !== memberId);
+  state.referrals = state.referrals.map((item) => {
+    if (item.referrerId === memberId) {
+      return { ...item, referrerId: "", occurrence: 0, rate: 0, commission: 0 };
+    }
+    return item;
+  });
+
+  normalizeAllRecords(state);
+  persist();
+
+  return { removed: true };
+}
+
+function resetMemberPassword(requestUser, memberId, nextPassword) {
+  assertFeaturePermission(requestUser, "manageUsers");
+  if (typeof nextPassword !== "string" || nextPassword.length < 6) {
+    throw httpError(400, "Mật khẩu mới phải có tối thiểu 6 ký tự.");
+  }
+
+  const member = state.users.find((item) => item.id === memberId && item.role === "member");
+  if (!member) {
+    throw httpError(404, "Không tìm thấy tài khoản thành viên.");
+  }
+
+  member.passwordHash = bcrypt.hashSync(nextPassword, 10);
+  persist();
+  return { updatedUserId: member.id };
 }
 
 module.exports = {
@@ -728,10 +1177,22 @@ module.exports = {
   updateCustomer,
   deleteCustomer,
   addProduct,
+  updateProduct,
+  deleteProduct,
   addReferral,
+  updateReferral,
+  deleteReferral,
+  purgeDataByDateRange,
   addVisit,
+  updateVisit,
+  deleteVisit,
+  changeCurrentUserPassword,
+  addPersistListener,
+  DATA_FILE,
   findUserById,
   findUserByUsername,
+  deleteMemberAccount,
+  resetMemberPassword,
   getBootstrapForUser,
   hasFeaturePermission,
   httpError,

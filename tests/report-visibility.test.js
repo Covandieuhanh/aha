@@ -29,13 +29,13 @@ describe('Employee Detailed Report', () => {
 
     createMember(ctx, {
       fullName: 'Nhân viên 1',
-      username: 'nv1',
+      username: '0911111111',
       password: '123456',
     });
 
     createMember(ctx, {
       fullName: 'Nhân viên 2',
-      username: 'nv2',
+      username: '0911111112',
       password: '123456',
     });
 
@@ -47,7 +47,7 @@ describe('Employee Detailed Report', () => {
     const dateValue = dateInMonth(monthValue, 12);
 
     addReferral(ctx, {
-      referrerUsername: 'nv1',
+      referrerUsername: '0911111111',
       referredCustomerName: 'Khách C1',
       productName: 'Liệu trình VIP',
       date: dateValue,
@@ -55,7 +55,7 @@ describe('Employee Detailed Report', () => {
     });
 
     addReferral(ctx, {
-      referrerUsername: 'nv2',
+      referrerUsername: '0911111112',
       referredCustomerName: 'Khách C2',
       productName: 'Liệu trình VIP',
       date: dateValue,
@@ -63,14 +63,14 @@ describe('Employee Detailed Report', () => {
     });
 
     logout(ctx);
-    login(ctx, 'nv1', '123456');
+    login(ctx, '0911111111', '123456');
 
     const reportRows = getDataRows(ctx, 'report-table-body');
     const reportText = getRowTexts(ctx, 'report-table-body').join(' | ');
 
     expect(reportRows).toHaveLength(1);
-    expect(reportText).toContain('(nv1)');
-    expect(reportText).not.toContain('(nv2)');
+    expect(reportText).toContain('(0911111111)');
+    expect(reportText).not.toContain('(0911111112)');
 
     const summaryText = textOf(ctx.document.getElementById('report-summary'));
     expect(summaryText).toContain('Số giao dịch nhận hoa hồng');

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Aha CRM | Quản trị khách hàng</title>
+    <title>Aha | Hệ thống quản trị khách hàng</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -19,13 +19,13 @@
     <main class="container">
       <section id="auth-view" class="auth-view">
         <article class="auth-card">
-          <p class="hero-tag">AHA CRM</p>
+          <p class="hero-tag">AHA</p>
           <h1>Đăng nhập hệ thống</h1>
           <p class="auth-desc">Quản trị khách hàng, sản phẩm dịch vụ, tích điểm voucher và trả hoa hồng giới thiệu.</p>
           <form id="login-form" class="form-grid">
             <label>
               Tên đăng nhập
-              <input type="text" id="login-username" required placeholder="Ví dụ: admin" />
+              <input type="text" id="login-username" required placeholder="Ví dụ: quantrivien" />
             </label>
             <label>
               Mật khẩu
@@ -42,7 +42,7 @@
         <header class="hero">
           <div class="hero-top">
             <div>
-              <p class="hero-tag">AHA CRM</p>
+              <p class="hero-tag">AHA</p>
               <h1>Quản trị khách hàng</h1>
               <p>Nhập thông tin, quản lý sản phẩm dịch vụ, ghi nhận lượt tới và tự động tính voucher/hoa hồng theo chính sách tháng.</p>
             </div>
@@ -54,25 +54,29 @@
           </div>
         </header>
 
-        <nav class="tabs" aria-label="Các tab quản trị">
+        <nav class="tabs" aria-label="Các mục quản trị">
           <button class="tab-btn" data-tab="customers" data-feature="customers">Thông tin khách hàng</button>
           <button class="tab-btn" data-tab="products" data-feature="products">Sản phẩm dịch vụ</button>
           <button class="tab-btn" data-tab="visits" data-feature="visits">Tích điểm voucher</button>
           <button class="tab-btn" data-tab="referrals" data-feature="referrals">Hoa hồng giới thiệu</button>
           <button class="tab-btn" data-tab="reports" data-feature="reports">Báo cáo chi tiết</button>
+          <button class="tab-btn" data-tab="maintenance" data-feature="dataCleanup">Quản trị dữ liệu theo khoảng thời gian</button>
+          <button class="tab-btn" data-tab="account" data-feature="changePassword">Thay đổi mật khẩu</button>
           <button class="tab-btn" data-tab="users" data-feature="manageUsers">Tài khoản thành viên</button>
         </nav>
 
         <section id="no-permission" class="card no-permission hidden">
           <h2>Tài khoản chưa được cấp quyền tính năng</h2>
-          <p>Vui lòng liên hệ admin để được bật quyền truy cập tab chức năng.</p>
+          <p>Vui lòng liên hệ quản trị viên để được bật quyền truy cập mục chức năng.</p>
         </section>
 
         <section class="tab-panel" id="tab-customers">
           <div class="panel-grid">
             <article class="card">
               <h2>Nhập khách hàng</h2>
-              <p class="card-desc">Nhân viên chỉ được sửa khách hàng khi admin cấp thêm quyền `Sửa thông tin khách hàng`.</p>
+              <p class="card-desc">
+                Nhân viên chỉ được sửa khách hàng khi quản trị viên cấp thêm quyền `Sửa thông tin khách hàng`.
+              </p>
               <form id="customer-form" class="form-grid">
                 <label>
                   Họ và tên
@@ -98,29 +102,32 @@
               <div id="customer-form-result" class="result-box"></div>
 
               <div class="import-export-box">
-                <h3>Nhập / Xuất dữ liệu khách hàng (CSV)</h3>
-                <p class="card-desc">Tải file mẫu để nhập đúng cột dữ liệu. Hệ thống chỉ nhận file `.csv`.</p>
+                <h3>Nhập và xuất dữ liệu khách hàng</h3>
+                <p class="card-desc">Tải tệp mẫu để nhập đúng cột dữ liệu. Hệ thống chỉ nhận tệp văn bản phân tách bằng dấu phẩy.</p>
                 <div class="form-actions">
-                  <button type="button" id="download-customer-template-btn" class="secondary-btn">Tải file mẫu CSV</button>
-                  <button type="button" id="export-customers-btn" class="secondary-btn">Xuất dữ liệu khách hàng CSV</button>
+                  <button type="button" id="download-customer-template-btn" class="secondary-btn">Tải tệp mẫu dữ liệu khách hàng</button>
+                  <button type="button" id="export-customers-btn" class="secondary-btn">Xuất dữ liệu khách hàng</button>
                 </div>
                 <label>
-                  Chọn file CSV để nhập
-                  <input type="file" id="customer-import-file" accept=".csv,text/csv" />
+                  Chọn tệp dữ liệu để nhập
+                  <input type="file" id="customer-import-file" accept=".csv,text/csv,text/plain" />
                 </label>
-                <button type="button" id="import-customers-btn" class="secondary-btn">Nhập dữ liệu từ file</button>
+                <button type="button" id="import-customers-btn" class="secondary-btn">Nhập dữ liệu từ tệp</button>
                 <div id="customer-import-result" class="result-box"></div>
               </div>
             </article>
 
             <article class="card">
               <h2>Danh sách khách hàng</h2>
+              <div class="table-controls">
+                <input type="search" id="customer-search" placeholder="Tìm khách theo tên, điện thoại, email, ghi chú" />
+              </div>
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
                       <th>Tên</th>
-                      <th>SĐT</th>
+                      <th>Số điện thoại</th>
                       <th>Email</th>
                       <th>Ghi chú</th>
                       <th>Ngày tạo</th>
@@ -148,14 +155,17 @@
                   <input type="text" id="product-code" placeholder="Ví dụ: DV001" />
                 </label>
                 <label>
-                  Giá gợi ý (VND)
-                  <input type="number" id="product-default-price" min="0" step="1000" placeholder="Ví dụ: 500000" />
+                  Giá gợi ý (Việt Nam đồng)
+                  <input type="text" inputmode="decimal" id="product-default-price" placeholder="Ví dụ: 500000" />
                 </label>
                 <label>
                   Ghi chú
                   <textarea id="product-note" rows="3" placeholder="Mô tả ngắn, lưu ý triển khai..."></textarea>
                 </label>
-                <button type="submit" class="primary-btn">Lưu sản phẩm dịch vụ</button>
+                <div class="form-actions">
+                  <button type="submit" id="product-submit-btn" class="primary-btn">Lưu sản phẩm dịch vụ</button>
+                  <button type="button" id="product-cancel-btn" class="secondary-btn hidden">Huỷ chỉnh sửa</button>
+                </div>
               </form>
               <div id="product-form-result" class="result-box"></div>
             </article>
@@ -170,6 +180,7 @@
                       <th>Mã</th>
                       <th>Giá gợi ý</th>
                       <th>Ghi chú</th>
+                      <th>Thao tác</th>
                       <th>Ngày tạo</th>
                     </tr>
                   </thead>
@@ -190,21 +201,26 @@
               <form id="visit-form" class="form-grid">
                 <label>
                   Khách hàng
-                  <select id="visit-customer" required></select>
+                  <input type="text" id="visit-customer" list="visit-customer-options" required />
+                  <datalist id="visit-customer-options"></datalist>
                 </label>
                 <label>
                   Sản phẩm / dịch vụ đã thực hiện
-                  <select id="visit-product" required></select>
+                  <input type="text" id="visit-product" list="visit-product-options" required />
+                  <datalist id="visit-product-options"></datalist>
                 </label>
                 <label>
                   Ngày giao dịch
                   <input type="date" id="visit-date" required />
                 </label>
                 <label>
-                  Doanh thu lần này (VND)
-                  <input type="number" id="visit-revenue" min="0" step="1000" required placeholder="Ví dụ: 2000000" />
+                  Doanh thu lần này (Việt Nam đồng)
+                  <input type="text" inputmode="decimal" id="visit-revenue" required placeholder="Ví dụ: 2000000" />
                 </label>
-                <button type="submit" class="primary-btn">Ghi nhận + tính voucher</button>
+                <div class="form-actions">
+                  <button type="submit" id="visit-submit-btn" class="primary-btn">Ghi nhận + tính voucher</button>
+                  <button type="button" id="visit-cancel-btn" class="secondary-btn hidden">Huỷ chỉnh sửa</button>
+                </div>
               </form>
               <div id="visit-result" class="result-box"></div>
             </article>
@@ -212,6 +228,7 @@
             <article class="card">
               <div class="card-head-inline">
                 <h2>Lịch sử tích điểm voucher</h2>
+                <input type="search" id="visit-search" class="inline-search" placeholder="Tìm theo khách hàng" />
                 <label class="inline-filter">
                   Tháng
                   <input type="month" id="visit-month-filter" />
@@ -229,6 +246,7 @@
                       <th>Tỷ lệ</th>
                       <th>Doanh thu</th>
                       <th>Voucher tích điểm</th>
+                      <th>Thao tác</th>
                     </tr>
                   </thead>
                   <tbody id="visit-table-body"></tbody>
@@ -243,30 +261,36 @@
             <article class="card">
               <h2>Ghi nhận giới thiệu khách hàng</h2>
               <p class="card-desc">
-                Người giới thiệu chỉ chọn từ tài khoản thành viên do admin tạo, có thể để trống.
+                Người giới thiệu chỉ chọn từ tài khoản thành viên do quản trị viên tạo, có thể để trống.
               </p>
               <form id="referral-form" class="form-grid">
                 <label>
                   Người giới thiệu (nhân viên, để trống nếu không có)
-                  <select id="referrer-user"></select>
+                  <input type="text" id="referrer-user" list="referrer-user-options" />
+                  <datalist id="referrer-user-options"></datalist>
                 </label>
                 <label>
                   Khách được giới thiệu (chọn từ danh sách khách hàng)
-                  <select id="referred-customer" required></select>
+                  <input type="text" id="referred-customer" list="referred-customer-options" required />
+                  <datalist id="referred-customer-options"></datalist>
                 </label>
                 <label>
                   Sản phẩm / dịch vụ đã thực hiện
-                  <select id="referral-product" required></select>
+                  <input type="text" id="referral-product" list="referral-product-options" required />
+                  <datalist id="referral-product-options"></datalist>
                 </label>
                 <label>
                   Ngày giao dịch
                   <input type="date" id="referral-date" required />
                 </label>
                 <label>
-                  Doanh thu lần này (VND)
-                  <input type="number" id="referral-revenue" min="0" step="1000" required placeholder="Ví dụ: 3000000" />
+                  Doanh thu lần này (Việt Nam đồng)
+                  <input type="text" inputmode="decimal" id="referral-revenue" required placeholder="Ví dụ: 3000000" />
                 </label>
-                <button type="submit" class="primary-btn">Ghi nhận + tính hoa hồng</button>
+                <div class="form-actions">
+                  <button type="submit" id="referral-submit-btn" class="primary-btn">Ghi nhận + tính hoa hồng</button>
+                  <button type="button" id="referral-cancel-btn" class="secondary-btn hidden">Huỷ chỉnh sửa</button>
+                </div>
               </form>
               <div id="referral-result" class="result-box"></div>
             </article>
@@ -274,6 +298,7 @@
             <article class="card">
               <div class="card-head-inline">
                 <h2>Lịch sử hoa hồng giới thiệu</h2>
+                <input type="search" id="referral-search" class="inline-search" placeholder="Tìm theo người giới thiệu" />
                 <label class="inline-filter">
                   Tháng
                   <input type="month" id="referral-month-filter" />
@@ -292,6 +317,7 @@
                       <th>Tỷ lệ</th>
                       <th>Doanh thu</th>
                       <th>Hoa hồng</th>
+                      <th>Thao tác</th>
                     </tr>
                   </thead>
                   <tbody id="referral-table-body"></tbody>
@@ -306,7 +332,7 @@
             <article class="card">
               <h2>Báo cáo chi tiết hoa hồng</h2>
               <p class="card-desc">
-                Tài khoản nhân viên chỉ có quyền xem tab này. Dữ liệu hiển thị lịch sử hoa hồng đã nhận theo từng giao dịch.
+                Tài khoản nhân viên chỉ có quyền xem mục này. Dữ liệu hiển thị lịch sử hoa hồng đã nhận theo từng giao dịch.
               </p>
               <label class="inline-filter">
                 Tháng
@@ -338,6 +364,85 @@
           </div>
         </section>
 
+        <section class="tab-panel" id="tab-maintenance">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Xoá dữ liệu theo khoảng thời gian</h2>
+              <p class="card-desc">
+                Chọn ngày bắt đầu và ngày kết thúc để xoá dữ liệu trong khoảng thời gian chỉ định.
+              </p>
+              <form id="maintenance-form" class="form-grid">
+                <label>
+                  Ngày bắt đầu
+                  <input type="date" id="maintenance-from-date" required />
+                </label>
+                <label>
+                  Ngày kết thúc
+                  <input type="date" id="maintenance-to-date" required />
+                </label>
+                <fieldset class="permission-box">
+                  <legend>Nhóm dữ liệu cần xoá</legend>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="maintenance-scope-customers" checked />
+                    Khách hàng
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="maintenance-scope-products" checked />
+                    Sản phẩm và dịch vụ
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="maintenance-scope-visits" checked />
+                    Giao dịch tích điểm voucher
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="maintenance-scope-referrals" checked />
+                    Giao dịch hoa hồng giới thiệu
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="maintenance-scope-members" />
+                    Tài khoản thành viên được tạo trong khoảng thời gian (không xoá tài khoản quản trị viên)
+                  </label>
+                </fieldset>
+                <button type="submit" class="primary-btn">Xoá dữ liệu theo khoảng thời gian đã chọn</button>
+              </form>
+              <div id="maintenance-result" class="result-box"></div>
+            </article>
+
+            <article class="card">
+              <h2>Sao lưu dữ liệu an toàn</h2>
+              <p class="card-desc">
+                Hệ thống có thể sao lưu tự động theo cấu hình máy chủ. Bạn có thể bấm nút bên dưới để yêu cầu sao lưu ngay.
+              </p>
+              <button type="button" id="backup-now-btn" class="secondary-btn">Sao lưu dữ liệu ngay bây giờ</button>
+              <div id="backup-status" class="result-box"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-account">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Thay đổi mật khẩu</h2>
+              <form id="change-password-form" class="form-grid">
+                <label>
+                  Mật khẩu hiện tại
+                  <input type="password" id="current-password" required />
+                </label>
+                <label>
+                  Mật khẩu mới
+                  <input type="password" id="next-password" minlength="6" required />
+                </label>
+                <label>
+                  Xác nhận mật khẩu mới
+                  <input type="password" id="confirm-next-password" minlength="6" required />
+                </label>
+                <button type="submit" class="primary-btn">Lưu mật khẩu mới</button>
+              </form>
+              <div id="change-password-result" class="result-box"></div>
+            </article>
+          </div>
+        </section>
+
         <section class="tab-panel" id="tab-users">
           <div class="panel-grid">
             <article class="card">
@@ -348,8 +453,8 @@
                   <input type="text" id="member-full-name" required placeholder="Ví dụ: Trần B" />
                 </label>
                 <label>
-                  Tên đăng nhập
-                  <input type="text" id="member-username" required placeholder="Ví dụ: nhanvien01" />
+                  Số điện thoại (dùng để đăng nhập)
+                  <input type="tel" id="member-username" required placeholder="Ví dụ: 0901234567" />
                 </label>
                 <label>
                   Mật khẩu
@@ -371,12 +476,48 @@
                     Sản phẩm dịch vụ
                   </label>
                   <label class="checkbox-label">
+                    <input type="checkbox" id="perm-products-edit" />
+                    Sửa sản phẩm dịch vụ
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-products-delete" />
+                    Xoá sản phẩm dịch vụ
+                  </label>
+                  <label class="checkbox-label">
                     <input type="checkbox" id="perm-visits" />
                     Tích điểm voucher
                   </label>
                   <label class="checkbox-label">
+                    <input type="checkbox" id="perm-visits-edit" />
+                    Sửa tích điểm voucher
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-visits-delete" />
+                    Xoá tích điểm voucher
+                  </label>
+                  <label class="checkbox-label">
                     <input type="checkbox" id="perm-referrals" />
                     Hoa hồng giới thiệu
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-referrals-edit" />
+                    Sửa hoa hồng giới thiệu
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-referrals-delete" />
+                    Xoá hoa hồng giới thiệu
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-data-cleanup" />
+                    Quản trị dữ liệu theo khoảng thời gian
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-backup-data" />
+                    Sao lưu dữ liệu
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-change-password" />
+                    Thay đổi mật khẩu
                   </label>
                   <label class="checkbox-label">
                     <input type="checkbox" id="perm-reports" checked />
@@ -391,7 +532,9 @@
 
             <article class="card">
               <h2>Danh sách tài khoản</h2>
-              <p class="card-desc">Admin có thể tuỳ ý thêm/xoá quyền cho từng tài khoản nhân viên rồi bấm lưu để cập nhật.</p>
+              <p class="card-desc">
+                Quản trị viên có thể tuỳ ý thêm hoặc xoá quyền cho từng tài khoản nhân viên rồi bấm lưu để cập nhật.
+              </p>
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -399,11 +542,23 @@
                       <th>Tài khoản</th>
                       <th>Tên đăng nhập</th>
                       <th>Khách hàng</th>
-                      <th>Sửa KH</th>
+                      <th>Sửa khách hàng</th>
                       <th>Sản phẩm</th>
+                      <th>Sửa sản phẩm</th>
+                      <th>Xoá sản phẩm</th>
                       <th>Voucher</th>
+                      <th>Sửa voucher</th>
+                      <th>Xoá voucher</th>
                       <th>Hoa hồng</th>
+                      <th>Sửa hoa hồng</th>
+                      <th>Xoá hoa hồng</th>
+                      <th>Quản trị dữ liệu</th>
+                      <th>Sao lưu dữ liệu</th>
+                      <th>Khoá</th>
+                      <th>Thay đổi mật khẩu</th>
                       <th>Báo cáo</th>
+                      <th>Đặt lại mật khẩu</th>
+                      <th>Xoá tài khoản</th>
                       <th>Lưu</th>
                       <th>Ngày tạo</th>
                     </tr>
@@ -416,6 +571,23 @@
         </section>
       </section>
     </main>
+
+    <!-- Popup thông báo -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+      <div class="modal">
+        <p id="modal-message"></p>
+        <button id="modal-ok-btn" class="primary-btn">OK</button>
+      </div>
+    </div>
+
+    <!-- Popup lịch sử khách hàng -->
+    <div id="history-overlay" class="modal-overlay hidden">
+      <div class="modal modal-large">
+        <h3 id="history-title">Lịch sử dịch vụ</h3>
+        <div id="history-content" class="history-content"></div>
+        <button id="history-close-btn" class="primary-btn">Đóng</button>
+      </div>
+    </div>
 
     <script src="runtime-config.js"></script>
     <script src="app.js"></script>

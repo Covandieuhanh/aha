@@ -30,7 +30,7 @@ describe('Business Rules', () => {
     createProduct(ctx, { name: 'Combo Chăm Sóc', code: 'DV01', defaultPrice: 500000 });
     createMember(ctx, {
       fullName: 'Nhân viên GT',
-      username: 'nvgt',
+      username: '0900003333',
       password: '123456',
     });
 
@@ -56,7 +56,7 @@ describe('Business Rules', () => {
     expect(visitRows.some((row) => row.includes('Lần 1') && row.includes('5%'))).toBe(true);
 
     addReferral(ctx, {
-      referrerUsername: 'nvgt',
+      referrerUsername: '0900003333',
       referredCustomerName: 'Khách A',
       productName: 'Combo Chăm Sóc',
       date: dateValue,
@@ -64,7 +64,7 @@ describe('Business Rules', () => {
     });
 
     addReferral(ctx, {
-      referrerUsername: 'nvgt',
+      referrerUsername: '0900003333',
       referredCustomerName: 'Khách B',
       productName: 'Combo Chăm Sóc',
       date: dateValue,

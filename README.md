@@ -19,7 +19,11 @@
   - Ghi nhận tích điểm voucher.
   - Ghi nhận hoa hồng giới thiệu.
   - Tạo tài khoản nhân viên.
-  - Bật/tắt quyền theo từng tính năng cho từng nhân viên (`Khách hàng`, `Sửa KH`, `Sản phẩm`, `Voucher`, `Hoa hồng`, `Báo cáo`) và bấm `Lưu` để áp dụng ngay.
+  - Bật hoặc tắt quyền theo từng tính năng cho từng nhân viên và bấm `Lưu` để áp dụng ngay.
+  - Các quyền chi tiết gồm: `Thông tin khách hàng`, `Sửa thông tin khách hàng`, `Sản phẩm dịch vụ`,
+    `Sửa sản phẩm dịch vụ`, `Xoá sản phẩm dịch vụ`, `Tích điểm voucher`, `Sửa tích điểm voucher`,
+    `Xoá tích điểm voucher`, `Hoa hồng giới thiệu`, `Sửa hoa hồng giới thiệu`, `Xoá hoa hồng giới thiệu`,
+    `Quản trị dữ liệu theo khoảng thời gian`, `Sao lưu dữ liệu`, `Thay đổi mật khẩu`, `Báo cáo chi tiết`.
 - Tài khoản nhân viên:
   - Mặc định khi tạo mới: chỉ có quyền tab `Báo cáo chi tiết`.
   - Chỉ thấy các tab được admin cấp.
@@ -33,7 +37,9 @@
 3. `Tích điểm voucher`: ghi nhận lượt khách tới Aha và tự tính voucher theo số lần trong tháng.
 4. `Hoa hồng giới thiệu`: ghi nhận giao dịch giới thiệu và tự tính hoa hồng theo số lần trong tháng.
 5. `Báo cáo chi tiết`: xem lịch sử hoa hồng.
-6. `Tài khoản thành viên`: chỉ admin thấy và thao tác.
+6. `Quản trị dữ liệu theo khoảng thời gian`: xoá dữ liệu theo phạm vi ngày và loại dữ liệu.
+7. `Thay đổi mật khẩu`: đổi mật khẩu cho chính tài khoản đang đăng nhập (khi có quyền).
+8. `Tài khoản thành viên`: chỉ quản trị viên thấy và thao tác.
 
 ## Nhập / Xuất dữ liệu khách hàng
 
@@ -137,9 +143,33 @@ Dữ liệu server được lưu tại:
 
 - `data/store.json`
 
-Sao lưu định kỳ file này (hoặc cả thư mục `data/`).
+Hệ thống đã có cơ chế sao lưu tự động trong `server mode`:
 
-Bạn có thể tạo bản sao lưu nhanh:
+- Sao lưu ngay khi dữ liệu thay đổi (theo cơ chế gom nhịp để tránh ghi quá dày).
+- Sao lưu hằng ngày theo giờ cấu hình.
+- Có thể bấm `Sao lưu dữ liệu ngay bây giờ` trong giao diện (khi tài khoản có quyền `Sao lưu dữ liệu`).
+
+Cấu hình trong `.env`:
+
+- `AHA_BACKUP_ENABLED=true`
+- `AHA_BACKUP_LOCAL_ENABLED=true`
+- `AHA_BACKUP_LOCAL_DIR=./data/backups`
+- `AHA_BACKUP_DAILY_HOUR=2`
+- `AHA_BACKUP_DAILY_MINUTE=0`
+- `AHA_BACKUP_IMMEDIATE_DEBOUNCE_MS=5000`
+- `AHA_BACKUP_MIN_INTERVAL_MS=15000`
+- `AHA_BACKUP_RUN_ON_START=true`
+- `AHA_BACKUP_HISTORY_ON_CHANGE=false`
+- `AHA_BACKUP_GITHUB_TOKEN=...`
+- `AHA_BACKUP_GITHUB_OWNER=...`
+- `AHA_BACKUP_GITHUB_REPO=...`
+- `AHA_BACKUP_GITHUB_BRANCH=main`
+- `AHA_BACKUP_GITHUB_LATEST_PATH=backups/latest/store.json`
+- `AHA_BACKUP_GITHUB_HISTORY_DIR=backups/history`
+
+Nếu cấu hình đầy đủ nhóm biến `AHA_BACKUP_GITHUB_*`, dữ liệu sẽ tự sao lưu lên GitHub để có thể khôi phục khi sự cố xảy ra ở máy chủ vận hành.
+
+Bạn vẫn có thể tạo bản sao lưu nhanh tại máy chủ:
 
 ```bash
 make backup

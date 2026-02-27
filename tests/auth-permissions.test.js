@@ -26,7 +26,7 @@ describe('Auth & Permissions', () => {
     expect(visibleTabs).toEqual(
       expect.arrayContaining(['customers', 'products', 'visits', 'referrals', 'reports', 'users']),
     );
-    expect(byId(ctx, 'session-user').textContent).toContain('Admin');
+    expect(byId(ctx, 'session-user').textContent).toContain('Quản trị viên');
   });
 
   it('employee account can only access detailed report tab', () => {
@@ -35,14 +35,14 @@ describe('Auth & Permissions', () => {
     login(ctx, 'admin', 'admin123');
     const createMsg = createMember(ctx, {
       fullName: 'Nhân viên A',
-      username: 'nva',
+      username: '0900000001',
       password: '123456',
     });
 
     expect(createMsg).toContain('Đã tạo tài khoản');
 
     logout(ctx);
-    login(ctx, 'nva', '123456');
+    login(ctx, '0900000001', '123456');
 
     const visibleTabs = getVisibleTabIds(ctx);
     expect(visibleTabs).toEqual(['reports']);
@@ -55,11 +55,11 @@ describe('Auth & Permissions', () => {
     login(ctx, 'admin', 'admin123');
     createMember(ctx, {
       fullName: 'Nhân viên B',
-      username: 'nvb',
+      username: '0900000002',
       password: '123456',
     });
 
-    const updateMessage = updateMemberPermissions(ctx, 'nvb', {
+    const updateMessage = updateMemberPermissions(ctx, '0900000002', {
       customers: true,
       products: true,
       visits: false,
@@ -67,10 +67,10 @@ describe('Auth & Permissions', () => {
       reports: false,
     });
 
-    expect(updateMessage).toContain('Đã cập nhật quyền cho nvb');
+    expect(updateMessage).toContain('Đã cập nhật quyền cho 0900000002');
 
     logout(ctx);
-    login(ctx, 'nvb', '123456');
+    login(ctx, '0900000002', '123456');
 
     const visibleTabs = getVisibleTabIds(ctx);
     expect(visibleTabs).toEqual(['customers', 'products', 'referrals']);

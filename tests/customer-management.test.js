@@ -25,13 +25,9 @@ describe('Customer Management Permissions', () => {
 
     login(ctx, 'admin', 'admin123');
     createCustomer(ctx, { name: 'Khách Sửa', phone: '0900000001' });
-    createMember(ctx, {
-      fullName: 'Nhân viên CS',
-      username: 'nvcs',
-      password: '123456',
-    });
+    createMember(ctx, { fullName: 'Nhân viên CS', username: '0900000003', password: '123456' });
 
-    updateMemberPermissions(ctx, 'nvcs', {
+    updateMemberPermissions(ctx, '0900000003', {
       customers: true,
       customerEdit: false,
       products: false,
@@ -41,7 +37,7 @@ describe('Customer Management Permissions', () => {
     });
 
     logout(ctx);
-    login(ctx, 'nvcs', '123456');
+    login(ctx, '0900000003', '123456');
 
     const rowsWithoutEdit = getDataRows(ctx, 'customer-table-body');
     expect(rowsWithoutEdit[0].querySelector('.edit-customer-btn')).toBeNull();
@@ -49,7 +45,7 @@ describe('Customer Management Permissions', () => {
     logout(ctx);
     login(ctx, 'admin', 'admin123');
 
-    updateMemberPermissions(ctx, 'nvcs', {
+    updateMemberPermissions(ctx, '0900000003', {
       customers: true,
       customerEdit: true,
       products: false,
@@ -59,7 +55,7 @@ describe('Customer Management Permissions', () => {
     });
 
     logout(ctx);
-    login(ctx, 'nvcs', '123456');
+    login(ctx, '0900000003', '123456');
 
     const editMessage = editCustomer(ctx, {
       currentName: 'Khách Sửa',
@@ -80,13 +76,9 @@ describe('Customer Management Permissions', () => {
 
     login(ctx, 'admin', 'admin123');
     createCustomer(ctx, { name: 'Khách Xóa' });
-    createMember(ctx, {
-      fullName: 'Nhân viên X',
-      username: 'nvx',
-      password: '123456',
-    });
+    createMember(ctx, { fullName: 'Nhân viên X', username: '0900000004', password: '123456' });
 
-    updateMemberPermissions(ctx, 'nvx', {
+    updateMemberPermissions(ctx, '0900000004', {
       customers: true,
       customerEdit: true,
       products: false,
@@ -96,7 +88,7 @@ describe('Customer Management Permissions', () => {
     });
 
     logout(ctx);
-    login(ctx, 'nvx', '123456');
+    login(ctx, '0900000004', '123456');
 
     const memberRows = getDataRows(ctx, 'customer-table-body');
     expect(memberRows[0].querySelector('.delete-customer-btn')).toBeNull();
