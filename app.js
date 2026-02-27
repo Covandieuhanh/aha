@@ -58,6 +58,7 @@ const MEMBER_PERMISSION_KEYS = [
   "backupData",
   "changePassword",
   "reports",
+  "reportsAll",
 ];
 
 const state = {
@@ -87,6 +88,7 @@ const refs = {
   noPermission: document.getElementById("no-permission"),
 
   tabs: document.querySelectorAll(".tab-btn"),
+  tabSelector: document.getElementById("tab-selector"),
   panels: document.querySelectorAll(".tab-panel"),
 
   customerForm: document.getElementById("customer-form"),
@@ -148,8 +150,12 @@ const refs = {
   referralSummary: document.getElementById("referral-summary"),
 
   reportMonthFilter: document.getElementById("report-month-filter"),
+  reportSearch: document.getElementById("report-search"),
+  reportSearchOptions: document.getElementById("report-search-options"),
   reportSummary: document.getElementById("report-summary"),
+  reportVisitSummary: document.getElementById("report-visit-summary"),
   reportTableBody: document.getElementById("report-table-body"),
+  reportVisitTableBody: document.getElementById("report-visit-table-body"),
 
   maintenanceForm: document.getElementById("maintenance-form"),
   maintenanceFromDate: document.getElementById("maintenance-from-date"),
@@ -232,6 +238,14 @@ function bindEvents() {
     });
   });
 
+  if (refs.tabSelector) {
+    refs.tabSelector.addEventListener("change", (event) => {
+      const tabId = event.target.value;
+      if (!canAccessTab(tabId)) return;
+      setActiveTab(tabId);
+    });
+  }
+
   refs.loginForm.addEventListener("submit", (event) => {
     event.preventDefault();
     void handleLogin();
@@ -286,6 +300,9 @@ function bindEvents() {
     refs.referralSearch.addEventListener("input", renderReferrals);
   }
   refs.reportMonthFilter.addEventListener("change", renderReport);
+  if (refs.reportSearch) {
+    refs.reportSearch.addEventListener("input", renderReport);
+  }
   refs.maintenanceForm.addEventListener("submit", (event) => {
     event.preventDefault();
     purgeDataByDateRange();
@@ -430,6 +447,7 @@ function getDefaultMemberPermissions() {
     backupData: false,
     changePassword: false,
     reports: true,
+    reportsAll: false,
   };
 }
 
@@ -453,6 +471,7 @@ function buildMemberPermissions(rawPermissions) {
     backupData: Boolean(source.backupData ?? defaults.backupData),
     changePassword: Boolean(source.changePassword ?? defaults.changePassword),
     reports: Boolean(source.reports ?? defaults.reports),
+    reportsAll: Boolean(source.reportsAll ?? defaults.reportsAll),
   };
 }
 
@@ -1201,6 +1220,10 @@ function setActiveTab(tabId) {
   refs.panels.forEach((panel) => {
     panel.classList.toggle("active", tabId && panel.id === `tab-${tabId}`);
   });
+
+  if (refs.tabSelector && refs.tabSelector.value !== tabId) {
+    refs.tabSelector.value = tabId;
+  }
 
   if (tabId === "maintenance") {
     void refreshBackupStatus();
@@ -3362,19 +3385,52 @@ function renderReport() {
   const currentUser = getCurrentUser();
   if (!currentUser) {
     refs.reportSummary.innerHTML = "";
+    if (refs.reportVisitSummary) refs.reportVisitSummary.innerHTML = "";
     refs.reportTableBody.innerHTML = '<tr><td class="empty-cell" colspan="8">Vui lòng đăng nhập.</td></tr>';
+    if (refs.reportVisitTableBody) {
+      refs.reportVisitTableBody.innerHTML =
+        '<tr><td class="empty-cell" colspan="7">Vui lòng đăng nhập.</td></tr>';
+    }
     return;
   }
 
   const selectedMonth = refs.reportMonthFilter.value;
+  const query = normalizeTextValue(refs.reportSearch?.value || "");
+  const canSeeAllReports = isAdmin(currentUser) || Boolean(currentUser.permissions?.reportsAll);
   let filtered = state.referrals.filter((item) => item.referrerId);
 
-  if (!isAdmin(currentUser)) {
+  if (!canSeeAllReports) {
     filtered = filtered.filter((item) => item.referrerId === currentUser.id);
   }
 
   if (selectedMonth) {
     filtered = filtered.filter((item) => monthOf(item.date) === selectedMonth);
+  }
+
+  if (query) {
+    filtered = filtered.filter((item) => {
+      const refName = normalizeTextValue(getReferrerName(item.referrerId));
+      const cust = normalizeTextValue(getReferredCustomerDisplay(item));
+      return refName.includes(query) || cust.includes(query);
+    });
+  }
+
+  if (refs.reportSearchOptions) {
+    const options = [];
+    const names = new Set();
+    filtered.forEach((item) => {
+      const refName = getReferrerName(item.referrerId);
+      if (refName && !names.has(refName)) {
+        names.add(refName);
+        options.push(`<option value="${escapeHtml(refName)}"></option>`);
+      }
+      const custName = getReferredCustomerDisplay(item);
+      if (custName && !names.has(custName)) {
+        names.add(custName);
+        options.push(`<option value="${escapeHtml(custName)}"></option>`);
+      }
+    });
+    refs.reportSearchOptions.innerHTML = options.join("");
   }
 
   const rows = [...filtered].sort(sortByLatest);
@@ -3422,6 +3478,67 @@ function renderReport() {
       <strong>${formatMoney(totalCommission)}</strong>
     </div>
   `;
+
+  // Voucher (visits) summary: chỉ hiển thị khi có quyền reportsAll hoặc admin
+  if (canSeeAllReports) {
+    const visitMonthFiltered = selectedMonth
+      ? state.visits.filter((v) => monthOf(v.date) === selectedMonth)
+      : state.visits;
+    const visitFiltered = query
+      ? visitMonthFiltered.filter((v) => normalizeTextValue(getCustomerName(v.customerId)).includes(query))
+      : visitMonthFiltered;
+
+    const visitRows = [...visitFiltered].sort(sortByLatest);
+    if (refs.reportVisitTableBody) {
+      if (visitRows.length === 0) {
+        refs.reportVisitTableBody.innerHTML =
+          '<tr><td class="empty-cell" colspan="7">Chưa có dữ liệu tích điểm phù hợp tháng lọc.</td></tr>';
+      } else {
+        refs.reportVisitTableBody.innerHTML = visitRows
+          .map(
+            (item) => `
+          <tr>
+            <td>${formatDate(item.date)}</td>
+            <td>${escapeHtml(getCustomerName(item.customerId))}</td>
+            <td>${escapeHtml(getProductName(item.productId))}</td>
+            <td>Lần ${item.occurrence}</td>
+            <td>${formatPercent(item.rate)}</td>
+            <td>${formatMoney(item.revenue)}</td>
+            <td>${formatMoney(item.voucher)}</td>
+          </tr>
+        `,
+          )
+          .join("");
+      }
+    }
+
+    if (refs.reportVisitSummary) {
+      const totalVisitRevenue = visitFiltered.reduce((sum, item) => sum + item.revenue, 0);
+      const totalVoucher = visitFiltered.reduce((sum, item) => sum + item.voucher, 0);
+      refs.reportVisitSummary.innerHTML = `
+        <div class="summary-chip">
+          <p>Số lượt tích điểm</p>
+          <strong>${visitFiltered.length}</strong>
+        </div>
+        <div class="summary-chip">
+          <p>Tổng doanh thu</p>
+          <strong>${formatMoney(totalVisitRevenue)}</strong>
+        </div>
+        <div class="summary-chip">
+          <p>Tổng voucher tích điểm</p>
+          <strong>${formatMoney(totalVoucher)}</strong>
+        </div>
+      `;
+    }
+  } else {
+    if (refs.reportVisitTableBody) {
+      refs.reportVisitTableBody.innerHTML =
+        '<tr><td class="empty-cell" colspan="7">Bạn chưa được cấp quyền xem tổng hợp tích điểm voucher.</td></tr>';
+    }
+    if (refs.reportVisitSummary) {
+      refs.reportVisitSummary.innerHTML = "";
+    }
+  }
 }
 
 function showCustomerHistory(customerId) {
@@ -3480,7 +3597,7 @@ function renderUserAccounts() {
   const currentUser = getCurrentUser();
   if (!isAdmin(currentUser)) {
     refs.userTableBody.innerHTML =
-      '<tr><td class="empty-cell" colspan="22">Chỉ quản trị viên được xem danh sách tài khoản.</td></tr>';
+      '<tr><td class="empty-cell" colspan="23">Chỉ quản trị viên được xem danh sách tài khoản.</td></tr>';
     return;
   }
 
@@ -3552,6 +3669,7 @@ function renderUserAccounts() {
           <td><input type="checkbox" class="lock-toggle" data-user-id="${escapeHtml(user.id)}" ${user.locked ? "checked" : ""} /></td>
           ${renderPermissionCheckbox(user.id, "changePassword", permissions.changePassword)}
           ${renderPermissionCheckbox(user.id, "reports", permissions.reports)}
+          ${renderPermissionCheckbox(user.id, "reportsAll", permissions.reportsAll)}
           <td>${resetButtonCell}</td>
           <td>${deleteButtonCell}</td>
           <td><button type="button" class="secondary-btn table-btn save-permissions-btn" data-user-id="${escapeHtml(user.id)}">Lưu</button></td>

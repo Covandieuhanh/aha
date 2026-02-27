@@ -54,6 +54,20 @@
           </div>
         </header>
 
+        <div class="tab-select-wrap">
+          <label class="sr-only" for="tab-selector">Chọn mục quản trị</label>
+          <select id="tab-selector">
+            <option value="customers">Thông tin khách hàng</option>
+            <option value="products">Sản phẩm dịch vụ</option>
+            <option value="visits">Tích điểm voucher</option>
+            <option value="referrals">Hoa hồng giới thiệu</option>
+            <option value="reports">Báo cáo chi tiết</option>
+            <option value="maintenance">Quản trị dữ liệu theo khoảng thời gian</option>
+            <option value="account">Thay đổi mật khẩu</option>
+            <option value="users">Tài khoản thành viên</option>
+          </select>
+        </div>
+
         <nav class="tabs" aria-label="Các mục quản trị">
           <button class="tab-btn" data-tab="customers" data-feature="customers">Thông tin khách hàng</button>
           <button class="tab-btn" data-tab="products" data-feature="products">Sản phẩm dịch vụ</button>
@@ -334,11 +348,16 @@
               <p class="card-desc">
                 Tài khoản nhân viên chỉ có quyền xem mục này. Dữ liệu hiển thị lịch sử hoa hồng đã nhận theo từng giao dịch.
               </p>
-              <label class="inline-filter">
-                Tháng
-                <input type="month" id="report-month-filter" />
-              </label>
+              <div class="card-head-inline">
+                <label class="inline-filter">
+                  Tháng
+                  <input type="month" id="report-month-filter" />
+                </label>
+                <input type="search" id="report-search" list="report-search-options" class="inline-search" placeholder="Tìm theo người nhận hoặc khách hàng" />
+                <datalist id="report-search-options"></datalist>
+              </div>
               <div class="summary-row" id="report-summary"></div>
+              <div class="summary-row" id="report-visit-summary"></div>
             </article>
 
             <article class="card">
@@ -358,6 +377,26 @@
                     </tr>
                   </thead>
                   <tbody id="report-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="card">
+              <h2>Tổng hợp tích điểm voucher theo tháng</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ngày</th>
+                      <th>Khách hàng</th>
+                      <th>Sản phẩm dịch vụ</th>
+                      <th>Lần trong tháng</th>
+                      <th>Tỷ lệ</th>
+                      <th>Doanh thu</th>
+                      <th>Voucher</th>
+                    </tr>
+                  </thead>
+                  <tbody id="report-visit-table-body"></tbody>
                 </table>
               </div>
             </article>
@@ -557,6 +596,7 @@
                       <th>Khoá</th>
                       <th>Thay đổi mật khẩu</th>
                       <th>Báo cáo</th>
+                      <th>Báo cáo (tất cả)</th>
                       <th>Đặt lại mật khẩu</th>
                       <th>Xoá tài khoản</th>
                       <th>Lưu</th>
