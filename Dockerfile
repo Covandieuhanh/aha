@@ -4,6 +4,9 @@ WORKDIR /app
 
 RUN apk add --no-cache wget
 
+# Skip husky hooks in production image builds (husky is devDependency)
+ENV HUSKY=0
+
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund
 
