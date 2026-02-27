@@ -1,0 +1,36 @@
+{
+  "name": "data-aha",
+  "version": "1.0.0",
+  "description": "Ứng dụng web tĩnh quản lý khách hàng có đăng nhập và phân quyền.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "vitest run --reporter=verbose",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:changed": "vitest related",
+    "prepare": "husky",
+    "test:strict": "npm run test && npm run test:coverage",
+    "test:auto": "chokidar \"app.js\" \"index.html\" \"styles.css\" \"tests/**/*.js\" \"vitest.config.js\" -i \"coverage/**\" -i \"node_modules/**\" -c \"npm run test:strict\" --initial"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
+    "chokidar-cli": "^3.0.0",
+    "husky": "^9.1.7",
+    "jsdom": "^28.1.0",
+    "vitest": "^4.0.18"
+  }
+}

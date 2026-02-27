@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aha CRM | Quản trị khách hàng</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Sora:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-1" aria-hidden="true"></div>
+    <div class="bg-shape bg-shape-2" aria-hidden="true"></div>
+
+    <main class="container">
+      <section id="auth-view" class="auth-view">
+        <article class="auth-card">
+          <p class="hero-tag">AHA CRM</p>
+          <h1>Đăng nhập hệ thống</h1>
+          <p class="auth-desc">Quản trị khách hàng, sản phẩm dịch vụ, tích điểm voucher và trả hoa hồng giới thiệu.</p>
+          <form id="login-form" class="form-grid">
+            <label>
+              Tên đăng nhập
+              <input type="text" id="login-username" required placeholder="Ví dụ: admin" />
+            </label>
+            <label>
+              Mật khẩu
+              <input type="password" id="login-password" required placeholder="Nhập mật khẩu" />
+            </label>
+            <button type="submit" class="primary-btn">Đăng nhập</button>
+          </form>
+          <div id="login-message" class="result-box"></div>
+          <p class="auth-hint">Vui lòng dùng tài khoản được quản trị viên cấp.</p>
+        </article>
+      </section>
+
+      <section id="app-view" class="app-view hidden">
+        <header class="hero">
+          <div class="hero-top">
+            <div>
+              <p class="hero-tag">AHA CRM</p>
+              <h1>Quản trị khách hàng</h1>
+              <p>Nhập thông tin, quản lý sản phẩm dịch vụ, ghi nhận lượt tới và tự động tính voucher/hoa hồng theo chính sách tháng.</p>
+            </div>
+            <div class="user-panel">
+              <p id="runtime-mode" class="mode-chip"></p>
+              <p id="session-user" class="session-user"></p>
+              <button id="logout-btn" type="button" class="secondary-btn">Đăng xuất</button>
+            </div>
+          </div>
+        </header>
+
+        <nav class="tabs" aria-label="Các tab quản trị">
+          <button class="tab-btn" data-tab="customers" data-feature="customers">Thông tin khách hàng</button>
+          <button class="tab-btn" data-tab="products" data-feature="products">Sản phẩm dịch vụ</button>
+          <button class="tab-btn" data-tab="visits" data-feature="visits">Tích điểm voucher</button>
+          <button class="tab-btn" data-tab="referrals" data-feature="referrals">Hoa hồng giới thiệu</button>
+          <button class="tab-btn" data-tab="reports" data-feature="reports">Báo cáo chi tiết</button>
+          <button class="tab-btn" data-tab="users" data-feature="manageUsers">Tài khoản thành viên</button>
+        </nav>
+
+        <section id="no-permission" class="card no-permission hidden">
+          <h2>Tài khoản chưa được cấp quyền tính năng</h2>
+          <p>Vui lòng liên hệ admin để được bật quyền truy cập tab chức năng.</p>
+        </section>
+
+        <section class="tab-panel" id="tab-customers">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Nhập khách hàng</h2>
+              <p class="card-desc">Nhân viên chỉ được sửa khách hàng khi admin cấp thêm quyền `Sửa thông tin khách hàng`.</p>
+              <form id="customer-form" class="form-grid">
+                <label>
+                  Họ và tên
+                  <input type="text" id="customer-name" required placeholder="Ví dụ: Nguyễn Văn A" />
+                </label>
+                <label>
+                  Số điện thoại
+                  <input type="tel" id="customer-phone" placeholder="Ví dụ: 0901234567" />
+                </label>
+                <label>
+                  Email
+                  <input type="email" id="customer-email" placeholder="Ví dụ: a@gmail.com" />
+                </label>
+                <label>
+                  Ghi chú
+                  <textarea id="customer-note" rows="3" placeholder="Nhu cầu, lịch sử, lưu ý..."></textarea>
+                </label>
+                <div class="form-actions">
+                  <button type="submit" id="customer-submit-btn" class="primary-btn">Lưu khách hàng</button>
+                  <button type="button" id="customer-cancel-btn" class="secondary-btn hidden">Huỷ chỉnh sửa</button>
+                </div>
+              </form>
+              <div id="customer-form-result" class="result-box"></div>
+
+              <div class="import-export-box">
+                <h3>Nhập / Xuất dữ liệu khách hàng (CSV)</h3>
+                <p class="card-desc">Tải file mẫu để nhập đúng cột dữ liệu. Hệ thống chỉ nhận file `.csv`.</p>
+                <div class="form-actions">
+                  <button type="button" id="download-customer-template-btn" class="secondary-btn">Tải file mẫu CSV</button>
+                  <button type="button" id="export-customers-btn" class="secondary-btn">Xuất dữ liệu khách hàng CSV</button>
+                </div>
+                <label>
+                  Chọn file CSV để nhập
+                  <input type="file" id="customer-import-file" accept=".csv,text/csv" />
+                </label>
+                <button type="button" id="import-customers-btn" class="secondary-btn">Nhập dữ liệu từ file</button>
+                <div id="customer-import-result" class="result-box"></div>
+              </div>
+            </article>
+
+            <article class="card">
+              <h2>Danh sách khách hàng</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tên</th>
+                      <th>SĐT</th>
+                      <th>Email</th>
+                      <th>Ghi chú</th>
+                      <th>Ngày tạo</th>
+                      <th>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody id="customer-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-products">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Nhập sản phẩm dịch vụ</h2>
+              <form id="product-form" class="form-grid">
+                <label>
+                  Tên sản phẩm / dịch vụ
+                  <input type="text" id="product-name" required placeholder="Ví dụ: Gội đầu dưỡng sinh" />
+                </label>
+                <label>
+                  Mã sản phẩm (tuỳ chọn)
+                  <input type="text" id="product-code" placeholder="Ví dụ: DV001" />
+                </label>
+                <label>
+                  Giá gợi ý (VND)
+                  <input type="number" id="product-default-price" min="0" step="1000" placeholder="Ví dụ: 500000" />
+                </label>
+                <label>
+                  Ghi chú
+                  <textarea id="product-note" rows="3" placeholder="Mô tả ngắn, lưu ý triển khai..."></textarea>
+                </label>
+                <button type="submit" class="primary-btn">Lưu sản phẩm dịch vụ</button>
+              </form>
+              <div id="product-form-result" class="result-box"></div>
+            </article>
+
+            <article class="card">
+              <h2>Danh sách sản phẩm dịch vụ</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tên</th>
+                      <th>Mã</th>
+                      <th>Giá gợi ý</th>
+                      <th>Ghi chú</th>
+                      <th>Ngày tạo</th>
+                    </tr>
+                  </thead>
+                  <tbody id="product-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-visits">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Ghi nhận lượt khách đến Aha</h2>
+              <p class="card-desc">
+                Chính sách: lần 1 = 5%, lần 2 = 10%, ..., lần 9 = 45%, từ lần 10 trở lên = 50%.
+              </p>
+              <form id="visit-form" class="form-grid">
+                <label>
+                  Khách hàng
+                  <select id="visit-customer" required></select>
+                </label>
+                <label>
+                  Sản phẩm / dịch vụ đã thực hiện
+                  <select id="visit-product" required></select>
+                </label>
+                <label>
+                  Ngày giao dịch
+                  <input type="date" id="visit-date" required />
+                </label>
+                <label>
+                  Doanh thu lần này (VND)
+                  <input type="number" id="visit-revenue" min="0" step="1000" required placeholder="Ví dụ: 2000000" />
+                </label>
+                <button type="submit" class="primary-btn">Ghi nhận + tính voucher</button>
+              </form>
+              <div id="visit-result" class="result-box"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head-inline">
+                <h2>Lịch sử tích điểm voucher</h2>
+                <label class="inline-filter">
+                  Tháng
+                  <input type="month" id="visit-month-filter" />
+                </label>
+              </div>
+              <div class="summary-row" id="visit-summary"></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ngày</th>
+                      <th>Khách hàng</th>
+                      <th>Sản phẩm dịch vụ</th>
+                      <th>Lần trong tháng</th>
+                      <th>Tỷ lệ</th>
+                      <th>Doanh thu</th>
+                      <th>Voucher tích điểm</th>
+                    </tr>
+                  </thead>
+                  <tbody id="visit-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-referrals">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Ghi nhận giới thiệu khách hàng</h2>
+              <p class="card-desc">
+                Người giới thiệu chỉ chọn từ tài khoản thành viên do admin tạo, có thể để trống.
+              </p>
+              <form id="referral-form" class="form-grid">
+                <label>
+                  Người giới thiệu (nhân viên, để trống nếu không có)
+                  <select id="referrer-user"></select>
+                </label>
+                <label>
+                  Khách được giới thiệu (chọn từ danh sách khách hàng)
+                  <select id="referred-customer" required></select>
+                </label>
+                <label>
+                  Sản phẩm / dịch vụ đã thực hiện
+                  <select id="referral-product" required></select>
+                </label>
+                <label>
+                  Ngày giao dịch
+                  <input type="date" id="referral-date" required />
+                </label>
+                <label>
+                  Doanh thu lần này (VND)
+                  <input type="number" id="referral-revenue" min="0" step="1000" required placeholder="Ví dụ: 3000000" />
+                </label>
+                <button type="submit" class="primary-btn">Ghi nhận + tính hoa hồng</button>
+              </form>
+              <div id="referral-result" class="result-box"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head-inline">
+                <h2>Lịch sử hoa hồng giới thiệu</h2>
+                <label class="inline-filter">
+                  Tháng
+                  <input type="month" id="referral-month-filter" />
+                </label>
+              </div>
+              <div class="summary-row" id="referral-summary"></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ngày</th>
+                      <th>Người giới thiệu</th>
+                      <th>Khách được giới thiệu</th>
+                      <th>Sản phẩm dịch vụ</th>
+                      <th>Lần trong tháng</th>
+                      <th>Tỷ lệ</th>
+                      <th>Doanh thu</th>
+                      <th>Hoa hồng</th>
+                    </tr>
+                  </thead>
+                  <tbody id="referral-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-reports">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Báo cáo chi tiết hoa hồng</h2>
+              <p class="card-desc">
+                Tài khoản nhân viên chỉ có quyền xem tab này. Dữ liệu hiển thị lịch sử hoa hồng đã nhận theo từng giao dịch.
+              </p>
+              <label class="inline-filter">
+                Tháng
+                <input type="month" id="report-month-filter" />
+              </label>
+              <div class="summary-row" id="report-summary"></div>
+            </article>
+
+            <article class="card">
+              <h2>Lịch sử hoa hồng đã nhận</h2>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ngày</th>
+                      <th>Người nhận hoa hồng</th>
+                      <th>Khách được giới thiệu</th>
+                      <th>Sản phẩm dịch vụ</th>
+                      <th>Lần trong tháng</th>
+                      <th>Tỷ lệ</th>
+                      <th>Doanh thu</th>
+                      <th>Hoa hồng</th>
+                    </tr>
+                  </thead>
+                  <tbody id="report-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-users">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Tạo tài khoản thành viên</h2>
+              <form id="member-form" class="form-grid">
+                <label>
+                  Họ và tên
+                  <input type="text" id="member-full-name" required placeholder="Ví dụ: Trần B" />
+                </label>
+                <label>
+                  Tên đăng nhập
+                  <input type="text" id="member-username" required placeholder="Ví dụ: nhanvien01" />
+                </label>
+                <label>
+                  Mật khẩu
+                  <input type="password" id="member-password" minlength="6" required placeholder="Tối thiểu 6 ký tự" />
+                </label>
+
+                <fieldset class="permission-box">
+                  <legend>Quyền ban đầu cho tài khoản mới</legend>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-customers" />
+                    Thông tin khách hàng
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-customer-edit" />
+                    Sửa thông tin khách hàng
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-products" />
+                    Sản phẩm dịch vụ
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-visits" />
+                    Tích điểm voucher
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-referrals" />
+                    Hoa hồng giới thiệu
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-reports" checked />
+                    Báo cáo chi tiết
+                  </label>
+                </fieldset>
+
+                <button type="submit" class="primary-btn">Tạo tài khoản thành viên</button>
+              </form>
+              <div id="member-form-result" class="result-box"></div>
+            </article>
+
+            <article class="card">
+              <h2>Danh sách tài khoản</h2>
+              <p class="card-desc">Admin có thể tuỳ ý thêm/xoá quyền cho từng tài khoản nhân viên rồi bấm lưu để cập nhật.</p>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tài khoản</th>
+                      <th>Tên đăng nhập</th>
+                      <th>Khách hàng</th>
+                      <th>Sửa KH</th>
+                      <th>Sản phẩm</th>
+                      <th>Voucher</th>
+                      <th>Hoa hồng</th>
+                      <th>Báo cáo</th>
+                      <th>Lưu</th>
+                      <th>Ngày tạo</th>
+                    </tr>
+                  </thead>
+                  <tbody id="user-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="runtime-config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
