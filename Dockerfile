@@ -8,7 +8,7 @@ RUN apk add --no-cache wget
 ENV HUSKY=0
 
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 COPY . .
 RUN mkdir -p /app/data
