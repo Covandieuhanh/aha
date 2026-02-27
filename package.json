@@ -10,7 +10,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:changed": "vitest related",
-    "prepare": "husky",
+    "prepare": "husky || true",
     "test:strict": "npm run test && npm run test:coverage",
     "test:auto": "chokidar \"app.js\" \"index.html\" \"styles.css\" \"tests/**/*.js\" \"vitest.config.js\" -i \"coverage/**\" -i \"node_modules/**\" -c \"npm run test:strict\" --initial"
   },
