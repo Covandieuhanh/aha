@@ -1,0 +1,36 @@
+{
+  "customers": [],
+  "products": [],
+  "visits": [],
+  "referrals": [],
+  "users": [
+    {
+      "id": "user-admin-default",
+      "username": "admin",
+      "fullName": "Quản trị Aha",
+      "role": "admin",
+      "locked": false,
+      "permissions": {
+        "customers": true,
+        "customerEdit": true,
+        "products": true,
+        "productsEdit": true,
+        "productsDelete": true,
+        "visits": true,
+        "visitsEdit": true,
+        "visitsDelete": true,
+        "referrals": true,
+        "referralsEdit": true,
+        "referralsDelete": true,
+        "reports": true,
+        "reportsAll": true,
+        "dataCleanup": true,
+        "backupData": true,
+        "changePassword": true
+      },
+      "passwordHash": "$2b$10$j3NEMUAuGhS.DTLJ.2uKWOPZqat8zqTQUkTFtRbE.SOPa3CIU9wdO",
+      "createdAt": "2026-02-28T15:51:21.871Z"
+    }
+  ],
+  "pushSubscriptions": []
+}

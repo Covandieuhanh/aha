@@ -1,0 +1,5 @@
+{
+  "publicKey": "BP-9iStbweTRaN7ueappwk8sIDZUYVh_1JqAquuHIBmpFo7hrykgdKIAPXhsi6qoacGTwXsvD5pnm-DKcKMTr5M",
+  "privatePem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgE/wTKRifYWqZ+0bI\nFBd+fmrSb+j9Fz93heNK7x3ieuahRANCAAT/vYkrW8Hk0Wje7nmqacJPLCA2VGFY\nf9SagKrrhyAZqRaO4a8pIHSiAD14bIuqqGnBk8F7Lw+aZ5vgynCjE6+T\n-----END PRIVATE KEY-----\n",
+  "subject": "mailto:admin@example.com"
+}

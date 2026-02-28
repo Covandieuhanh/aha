@@ -212,6 +212,33 @@ function normalizeAllRecords(state) {
         .filter((item) => item.referredCustomerId && item.productId && item.date && item.revenue > 0)
     : [];
 
+  state.pushSubscriptions = Array.isArray(state.pushSubscriptions)
+    ? state.pushSubscriptions
+        .filter((item) => item && typeof item === "object")
+        .map((item) => {
+          const endpoint = typeof item.endpoint === "string" ? item.endpoint.trim() : "";
+          const userId = typeof item.userId === "string" ? item.userId : "";
+          const p256dh = typeof item?.keys?.p256dh === "string" ? item.keys.p256dh : "";
+          const auth = typeof item?.keys?.auth === "string" ? item.keys.auth : "";
+
+          return {
+            id: typeof item.id === "string" && item.id ? item.id : createId("push"),
+            userId,
+            endpoint,
+            keys: { p256dh, auth },
+            ua: typeof item.ua === "string" ? item.ua.slice(0, 180) : "",
+            createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString(),
+            lastActiveAt:
+              typeof item.lastActiveAt === "string"
+                ? item.lastActiveAt
+                : typeof item.createdAt === "string"
+                  ? item.createdAt
+                  : new Date().toISOString(),
+          };
+        })
+        .filter((item) => item.endpoint && item.userId && item.keys?.p256dh && item.keys?.auth)
+    : [];
+
   const visitGroups = new Set(state.visits.map((item) => `${item.customerId}|${monthOf(item.date)}`));
   visitGroups.forEach((groupKey) => {
     const [customerId, targetMonth] = groupKey.split("|");
@@ -295,6 +322,7 @@ function createInitialState() {
     visits: [],
     referrals: [],
     users: [],
+    pushSubscriptions: [],
   };
 }
 
@@ -316,6 +344,7 @@ function readStateFromDisk() {
       visits: Array.isArray(parsed.visits) ? parsed.visits : [],
       referrals: Array.isArray(parsed.referrals) ? parsed.referrals : [],
       users: Array.isArray(parsed.users) ? parsed.users : [],
+      pushSubscriptions: Array.isArray(parsed.pushSubscriptions) ? parsed.pushSubscriptions : [],
     };
   } catch (error) {
     return createInitialState();
@@ -406,6 +435,63 @@ function findUserByUsername(username) {
   if (!username) return null;
   const lowered = String(username).trim().toLowerCase();
   return state.users.find((item) => item.username.toLowerCase() === lowered) || null;
+}
+
+function upsertPushSubscription(userId, subscription, ua) {
+  if (!userId) {
+    throw httpError(400, "Thiếu thông tin người dùng cho đăng ký thông báo.");
+  }
+
+  const endpoint = typeof subscription?.endpoint === "string" ? subscription.endpoint.trim() : "";
+  const p256dh = typeof subscription?.keys?.p256dh === "string" ? subscription.keys.p256dh : "";
+  const auth = typeof subscription?.keys?.auth === "string" ? subscription.keys.auth : "";
+
+  if (!endpoint || !p256dh || !auth) {
+    throw httpError(400, "Thiếu dữ liệu đăng ký push (endpoint hoặc keys).");
+  }
+
+  const normalized = {
+    id: createId("push"),
+    userId,
+    endpoint,
+    keys: { p256dh, auth },
+    ua: typeof ua === "string" ? ua.slice(0, 180) : "",
+    createdAt: new Date().toISOString(),
+    lastActiveAt: new Date().toISOString(),
+  };
+
+  const existingIndex = state.pushSubscriptions.findIndex((item) => item.endpoint === endpoint);
+  if (existingIndex >= 0) {
+    const current = state.pushSubscriptions[existingIndex];
+    state.pushSubscriptions[existingIndex] = {
+      ...current,
+      ...normalized,
+      id: current.id,
+      createdAt: current.createdAt,
+    };
+    persist();
+    return clone(state.pushSubscriptions[existingIndex]);
+  }
+
+  state.pushSubscriptions.push(normalized);
+  persist();
+  return clone(normalized);
+}
+
+function getPushSubscriptionsForUser(userId) {
+  if (!userId) return [];
+  return state.pushSubscriptions.filter((item) => item.userId === userId).map(clone);
+}
+
+function removePushSubscriptionByEndpoint(endpoint) {
+  if (!endpoint) return false;
+  const before = state.pushSubscriptions.length;
+  state.pushSubscriptions = state.pushSubscriptions.filter((item) => item.endpoint !== endpoint);
+  if (state.pushSubscriptions.length !== before) {
+    persist();
+    return true;
+  }
+  return false;
 }
 
 function verifyPassword(user, password) {
@@ -1227,4 +1313,7 @@ module.exports = {
   safeUser,
   updateMemberPermissions,
   verifyPassword,
+  upsertPushSubscription,
+  getPushSubscriptionsForUser,
+  removePushSubscriptionByEndpoint,
 };

@@ -31,6 +31,26 @@ const runtime = {
   syncTimer: null,
 };
 
+function isPushSupported() {
+  return (
+    typeof window !== "undefined" &&
+    "Notification" in window &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window
+  );
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 const TAB_FEATURE_MAP = {
   customers: "customers",
   products: "products",
@@ -75,6 +95,7 @@ const state = {
   editingVisitId: null,
   editingReferralId: null,
   activeTab: "",
+  pushPermission: "default",
 };
 
 const refs = {
@@ -88,6 +109,9 @@ const refs = {
   sessionUser: document.getElementById("session-user"),
   logoutBtn: document.getElementById("logout-btn"),
   noPermission: document.getElementById("no-permission"),
+  pushBtn: document.getElementById("push-btn"),
+  pushStatus: document.getElementById("push-status"),
+  pushHint: document.getElementById("push-hint"),
 
   tabs: document.querySelectorAll(".tab-btn"),
   tabSelector: document.getElementById("tab-selector"),
@@ -216,6 +240,7 @@ const refs = {
 
 async function initialize() {
   renderRuntimeMode();
+  updatePushUI();
   setDefaultDates();
   setDefaultMemberPermissionInputs();
   setCustomerFormMode(false);
@@ -263,6 +288,11 @@ function bindEvents() {
   refs.logoutBtn.addEventListener("click", () => {
     handleLogout();
   });
+  if (refs.pushBtn) {
+    refs.pushBtn.addEventListener("click", () => {
+      void handlePushButton();
+    });
+  }
 
   refs.customerForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -388,6 +418,108 @@ function renderRuntimeMode() {
   if (!refs.runtimeMode) return;
 
   refs.runtimeMode.textContent = runtime.remoteMode ? "Chế độ: Máy chủ dùng chung" : "Chế độ: Một máy cục bộ";
+}
+
+function updatePushUI() {
+  if (!refs.pushBtn || !refs.pushStatus) return;
+  const supported = isPushSupported() && runtime.remoteMode;
+
+  if (!supported) {
+    refs.pushBtn.classList.add("hidden");
+    refs.pushStatus.textContent = "Thiết bị không hỗ trợ thông báo nền.";
+    return;
+  }
+
+  const permission = Notification.permission;
+  state.pushPermission = permission;
+
+  if (permission === "granted") {
+    refs.pushStatus.textContent = "Đã bật thông báo";
+    refs.pushBtn.textContent = "Gửi thông báo thử";
+    refs.pushBtn.classList.remove("hidden");
+  } else if (permission === "denied") {
+    refs.pushStatus.textContent = "Bạn đã chặn thông báo cho AHA. Hãy bật lại trong cài đặt trình duyệt.";
+    refs.pushBtn.classList.add("hidden");
+  } else {
+    refs.pushStatus.textContent = "Bật để nhận thông báo nền";
+    refs.pushBtn.textContent = "Bật thông báo";
+    refs.pushBtn.classList.remove("hidden");
+  }
+
+  if (refs.pushHint) {
+    refs.pushHint.classList.toggle("hidden", !supported);
+  }
+}
+
+async function registerServiceWorker() {
+  if (!isPushSupported() || !runtime.remoteMode) return null;
+  try {
+    const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    return registration;
+  } catch (error) {
+    console.warn("Không thể đăng ký Service Worker:", error);
+    return null;
+  }
+}
+
+async function fetchVapidPublicKey() {
+  const payload = await apiRequest("/push/public-key", { method: "GET" });
+  if (!payload?.publicKey) throw new Error("Không nhận được VAPID public key.");
+  return payload.publicKey;
+}
+
+async function subscribePush(registration) {
+  const publicKey = await fetchVapidPublicKey();
+  const appServerKey = urlBase64ToUint8Array(publicKey);
+
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: appServerKey,
+  });
+
+  await apiRequest("/push/subscribe", {
+    method: "POST",
+    body: { subscription, ua: navigator.userAgent },
+  });
+}
+
+async function handlePushButton() {
+  if (!isPushSupported() || !runtime.remoteMode) return;
+
+  if (Notification.permission === "granted") {
+    try {
+      await apiRequest("/push/test", { method: "POST" });
+      refs.pushStatus.textContent = "Đã gửi thông báo thử (kiểm tra khay thông báo)";
+    } catch (error) {
+      refs.pushStatus.textContent = error?.message || "Không gửi được thông báo thử.";
+    }
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    refs.pushStatus.textContent = "Bạn đã chặn thông báo. Bật lại trong cài đặt trình duyệt.";
+    return;
+  }
+
+  const permission = await Notification.requestPermission();
+  state.pushPermission = permission;
+
+  if (permission !== "granted") {
+    updatePushUI();
+    return;
+  }
+
+  try {
+    const registration = await registerServiceWorker();
+    if (!registration) throw new Error("Không đăng ký được Service Worker.");
+    await subscribePush(registration);
+    refs.pushStatus.textContent = "Đã bật thông báo.";
+  } catch (error) {
+    refs.pushStatus.textContent = error?.message || "Không bật được thông báo.";
+    console.error(error);
+  } finally {
+    updatePushUI();
+  }
 }
 
 function loadState() {
@@ -1202,6 +1334,8 @@ function renderAuthState() {
     refs.authView.classList.remove("hidden");
     refs.appView.classList.add("hidden");
     setActiveTab("");
+    if (refs.pushBtn) refs.pushBtn.classList.add("hidden");
+    if (refs.pushStatus) refs.pushStatus.textContent = "";
     return;
   }
 
@@ -1217,6 +1351,9 @@ function renderAuthState() {
   if (runtime.remoteMode) {
     startRemoteAutoSync();
   }
+
+  updatePushUI();
+  void registerServiceWorker();
 }
 
 function applyTabPermissions() {

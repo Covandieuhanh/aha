@@ -34,8 +34,15 @@ const {
   updateCustomer,
   updateMemberPermissions,
   verifyPassword,
+  upsertPushSubscription,
+  getPushSubscriptionsForUser,
+  removePushSubscriptionByEndpoint,
 } = require("./server/dataStore");
 const { createBackupManager } = require("./server/backupManager");
+const fs = require("fs");
+const crypto = require("crypto");
+
+const ROOT_DIR = __dirname;
 
 const app = express();
 
@@ -45,6 +52,8 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-session-secret
 const COOKIE_NAME = "aha_session";
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
 const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
+const VAPID_SUBJECT = process.env.AHA_VAPID_SUBJECT || "mailto:admin@example.com";
+const VAPID_FILE = path.join(__dirname, "data", "vapid.json");
 
 const backupManager = createBackupManager({
   dataFile: DATA_FILE,
@@ -67,6 +76,7 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use(morgan("tiny"));
+app.use("/icons", express.static(path.join(ROOT_DIR, "icons"), { maxAge: "7d" }));
 
 function signSessionToken(userId) {
   return jwt.sign({ sub: userId }, SESSION_SECRET, {
@@ -139,6 +149,18 @@ app.get("/runtime-config.js", (_req, res) => {
   res.send(
     `window.__AHA_API_BASE__ = ${JSON.stringify(process.env.AHA_API_BASE || "/api")};\nwindow.__AHA_FORCE_REMOTE__ = true;`,
   );
+});
+
+app.get("/manifest.webmanifest", (_req, res) => {
+  res.type("application/manifest+json");
+  res.set("Cache-Control", "no-store");
+  res.sendFile(path.join(ROOT_DIR, "manifest.webmanifest"));
+});
+
+app.get("/sw.js", (_req, res) => {
+  res.type("application/javascript");
+  res.set("Cache-Control", "no-store");
+  res.sendFile(path.join(ROOT_DIR, "sw.js"));
 });
 
 app.post("/api/auth/login", (req, res) => {
@@ -385,7 +407,46 @@ app.post("/api/backup/run", requireAuth, async (req, res) => {
   }
 });
 
-const ROOT_DIR = __dirname;
+app.get("/api/push/public-key", requireAuth, (_req, res) => {
+  res.json({ publicKey: vapidKeys.publicKey });
+});
+
+app.post("/api/push/subscribe", requireAuth, (req, res) => {
+  try {
+    const subscription = req.body?.subscription;
+    const stored = upsertPushSubscription(req.user.id, subscription, req.headers["user-agent"]);
+    res.status(201).json({ ok: true, subscription: stored });
+  } catch (error) {
+    sendApiError(res, error, "Không thể lưu đăng ký thông báo.");
+  }
+});
+
+app.post("/api/push/test", requireAuth, async (req, res) => {
+  try {
+    const subs = getPushSubscriptionsForUser(req.user.id);
+    if (subs.length === 0) {
+      res.status(400).json({ message: "Bạn chưa đăng ký nhận thông báo trên thiết bị này." });
+      return;
+    }
+
+    const results = [];
+    for (const sub of subs) {
+      try {
+        const result = await sendPushPing(sub);
+        if (!result.ok && result.status === 410) {
+          removePushSubscriptionByEndpoint(sub.endpoint);
+        }
+        results.push({ endpoint: sub.endpoint, status: result.status, ok: result.ok });
+      } catch (error) {
+        results.push({ endpoint: sub.endpoint, status: 500, ok: false, error: error?.message });
+      }
+    }
+
+    res.json({ ok: true, results });
+  } catch (error) {
+    sendApiError(res, error, "Không thể gửi thông báo thử.");
+  }
+});
 
 app.get("/", (_req, res) => {
   res.sendFile(path.join(ROOT_DIR, "index.html"));
@@ -428,6 +489,85 @@ process.on("SIGINT", () => {
   backupManager.stop();
   process.exit(0);
 });
+
+// --- Web Push helpers ----------------------------------------------------
+function toBase64Url(buffer) {
+  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64Url(str) {
+  return Buffer.from(str.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+}
+
+function loadOrCreateVapidKeys() {
+  if (process.env.AHA_VAPID_PUBLIC_KEY && process.env.AHA_VAPID_PRIVATE_KEY) {
+    const publicKey = process.env.AHA_VAPID_PUBLIC_KEY.trim();
+    const privatePem = process.env.AHA_VAPID_PRIVATE_KEY.trim();
+    return { publicKey, privatePem, subject: VAPID_SUBJECT };
+  }
+
+  if (fs.existsSync(VAPID_FILE)) {
+    try {
+      const saved = JSON.parse(fs.readFileSync(VAPID_FILE, "utf8"));
+      if (saved?.publicKey && saved?.privatePem) {
+        return { publicKey: saved.publicKey, privatePem: saved.privatePem, subject: saved.subject || VAPID_SUBJECT };
+      }
+    } catch (error) {
+      console.warn("[AHA] Không đọc được vapid.json, sẽ tạo khoá mới.");
+    }
+  }
+
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const publicJwk = publicKey.export({ format: "jwk" });
+  const rawPublic = Buffer.concat([Buffer.from([0x04]), fromBase64Url(publicJwk.x), fromBase64Url(publicJwk.y)]);
+  const publicKeyBase64Url = toBase64Url(rawPublic);
+  const privatePem = privateKey.export({ format: "pem", type: "pkcs8" });
+
+  fs.mkdirSync(path.dirname(VAPID_FILE), { recursive: true });
+  fs.writeFileSync(
+    VAPID_FILE,
+    JSON.stringify({ publicKey: publicKeyBase64Url, privatePem, subject: VAPID_SUBJECT }, null, 2),
+    "utf8",
+  );
+
+  console.log("[AHA] Đã tạo VAPID keypair mới và lưu vào data/vapid.json");
+  return { publicKey: publicKeyBase64Url, privatePem, subject: VAPID_SUBJECT };
+}
+
+const vapidKeys = loadOrCreateVapidKeys();
+
+function signVapidToken(audience) {
+  const exp = Math.floor(Date.now() / 1000) + 12 * 60 * 60; // 12h
+  const header = toBase64Url(Buffer.from(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const payload = toBase64Url(Buffer.from(JSON.stringify({ aud: audience, exp, sub: vapidKeys.subject })));
+  const data = `${header}.${payload}`;
+
+  const signer = crypto.createSign("SHA256");
+  signer.update(data);
+  const signature = toBase64Url(signer.sign(vapidKeys.privatePem));
+  return `${data}.${signature}`;
+}
+
+async function sendPushPing(subscription) {
+  const endpoint = subscription?.endpoint;
+  if (!endpoint) {
+    return { ok: false, status: 400, message: "Missing endpoint" };
+  }
+
+  const url = new URL(endpoint);
+  const audience = `${url.protocol}//${url.host}`;
+  const vapidToken = signVapidToken(audience);
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      TTL: "2419200",
+      Authorization: `WebPush ${vapidToken}`,
+    },
+  });
+
+  return { ok: response.ok, status: response.status, message: await response.text() };
+}
 
 process.on("SIGTERM", () => {
   backupManager.stop();
