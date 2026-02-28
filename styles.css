@@ -725,6 +725,12 @@ th {
     gap: 10px;
   }
 
+  .card-head-inline .inline-search {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+  }
+
   .summary-row {
     grid-template-columns: 1fr;
   }
