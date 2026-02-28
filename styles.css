@@ -14,11 +14,17 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   font-family: "Be Vietnam Pro", sans-serif;
   color: var(--ink);
   min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
   background:
     radial-gradient(circle at 18% 18%, rgba(13, 141, 115, 0.2), transparent 42%),
     radial-gradient(circle at 85% 10%, rgba(255, 139, 61, 0.2), transparent 36%),
@@ -27,6 +33,18 @@ body {
 
 .hidden {
   display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .bg-shape {
@@ -56,6 +74,14 @@ body {
   width: min(1100px, 96%);
   margin: 20px auto 40px;
   padding: 0 10px;
+}
+
+.app-view,
+.hero,
+.card,
+.tab-panel,
+.panel-grid > * {
+  min-width: 0;
 }
 
 .auth-view {
@@ -429,6 +455,7 @@ textarea:focus {
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--line);
   border-radius: 10px;
+  max-width: 100%;
 }
 
 .table-wrap-compact {
@@ -594,15 +621,85 @@ th {
 
   .container {
     width: 100%;
-    margin: 12px auto 20px;
-    padding: 0 12px;
+    max-width: 430px;
+    margin: 10px auto 24px;
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
   }
 
   .auth-card,
   .hero,
   .card {
-    padding: 14px;
-    border-radius: 14px;
+    width: 100%;
+    padding: 16px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.94);
+  }
+
+  .hero {
+    margin-bottom: 12px;
+  }
+
+  .hero-top {
+    gap: 14px;
+  }
+
+  .hero-top > * {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .user-panel {
+    width: 100%;
+    min-width: 0;
+    justify-items: stretch;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(16, 41, 26, 0.08);
+  }
+
+  .mode-chip {
+    justify-self: start;
+  }
+
+  .session-user {
+    width: 100%;
+    text-align: left;
+    line-height: 1.45;
+  }
+
+  .user-panel .secondary-btn {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  .tab-select-wrap {
+    display: block;
+    width: 100%;
+    margin: 0 0 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.58);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: var(--shadow);
+  }
+
+  .tab-select-wrap label {
+    margin-bottom: 6px;
+  }
+
+  .tab-select-wrap select,
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px;
+  }
+
+  input,
+  select,
+  textarea {
+    min-height: 48px;
   }
 
   .tabs {
@@ -620,15 +717,16 @@ th {
   .form-actions .primary-btn,
   .form-actions .secondary-btn {
     width: 100%;
-    min-height: 44px;
+    min-height: 48px;
   }
 
   .card-head-inline {
     margin-bottom: 8px;
+    gap: 10px;
   }
 
   .summary-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
   table {
@@ -644,24 +742,29 @@ th {
   .tabs {
     display: none;
   }
-
-  .tab-select-wrap {
-    display: block;
-  }
 }
 
 @media (max-width: 520px) {
-  .hero h1 {
-    font-size: 1.35rem;
+  .bg-shape {
+    filter: blur(28px);
+    opacity: 0.6;
   }
 
-  .summary-row {
-    grid-template-columns: 1fr;
+  .hero h1 {
+    font-size: 1.32rem;
+  }
+
+  .hero,
+  .card,
+  .tab-select-wrap {
+    padding: 14px;
+    border-radius: 16px;
   }
 
   .inline-filter {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   table {
@@ -671,5 +774,22 @@ th {
   .inline-search {
     width: 100%;
     min-width: 0;
+  }
+
+  .card h2 {
+    font-size: 1.02rem;
+    line-height: 1.3;
+  }
+
+  .card-desc,
+  label,
+  .result-box {
+    font-size: 0.98rem;
+    line-height: 1.45;
+  }
+
+  .primary-btn,
+  .secondary-btn {
+    border-radius: 14px;
   }
 }
