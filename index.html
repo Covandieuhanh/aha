@@ -535,38 +535,79 @@
 
                 <fieldset class="permission-box">
                   <legend>Quyền ban đầu cho tài khoản mới</legend>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-customers" />
-                    Thông tin khách hàng
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-customer-edit" />
-                    Sửa thông tin khách hàng
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-products" />
-                    Sản phẩm dịch vụ
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-products-edit" />
-                    Sửa sản phẩm dịch vụ
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-products-delete" />
-                    Xoá sản phẩm dịch vụ
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-visits" />
-                    Giao dịch dịch vụ
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-visits-edit" />
-                    Sửa giao dịch dịch vụ
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-visits-delete" />
-                    Xoá giao dịch dịch vụ
-                  </label>
+                  <div class="permission-groups">
+                    <section class="permission-subgroup">
+                      <h3>Dữ liệu nền</h3>
+                      <p class="permission-hint">Dùng khi nhân viên cần quản lý hồ sơ khách hàng và danh mục dịch vụ.</p>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-customers" />
+                        Thông tin khách hàng
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-customer-edit" />
+                        Sửa thông tin khách hàng
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-products" />
+                        Sản phẩm dịch vụ
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-products-edit" />
+                        Sửa sản phẩm dịch vụ
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-products-delete" />
+                        Xoá sản phẩm dịch vụ
+                      </label>
+                    </section>
+
+                    <section class="permission-subgroup">
+                      <h3>Giao dịch</h3>
+                      <p class="permission-hint">Quyền này bao gồm cả tích điểm voucher và hoa hồng giới thiệu trong cùng một thao tác.</p>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-visits" />
+                        Giao dịch dịch vụ
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-visits-edit" />
+                        Sửa giao dịch dịch vụ
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-visits-delete" />
+                        Xoá giao dịch dịch vụ
+                      </label>
+                    </section>
+
+                    <section class="permission-subgroup">
+                      <h3>Báo cáo</h3>
+                      <p class="permission-hint">Chọn đúng mức báo cáo theo phạm vi nhân viên được phép xem.</p>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-reports" checked />
+                        Báo cáo (của mình)
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-reports-all" />
+                        Báo cáo (tất cả)
+                      </label>
+                    </section>
+
+                    <section class="permission-subgroup">
+                      <h3>Hệ thống</h3>
+                      <p class="permission-hint">Dành cho người phụ trách quản trị dữ liệu, sao lưu và hỗ trợ vận hành.</p>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-data-cleanup" />
+                        Quản trị dữ liệu theo khoảng thời gian
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-backup-data" />
+                        Sao lưu dữ liệu
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-change-password" />
+                        Thay đổi mật khẩu
+                      </label>
+                    </section>
+                  </div>
                   <label class="checkbox-label hidden">
                     <input type="checkbox" id="perm-referrals" />
                     Hoa hồng giới thiệu
@@ -578,26 +619,6 @@
                   <label class="checkbox-label hidden">
                     <input type="checkbox" id="perm-referrals-delete" />
                     Xoá hoa hồng giới thiệu
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-data-cleanup" />
-                    Quản trị dữ liệu theo khoảng thời gian
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-backup-data" />
-                    Sao lưu dữ liệu
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-change-password" />
-                    Thay đổi mật khẩu
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-reports" checked />
-                    Báo cáo (của mình)
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="perm-reports-all" />
-                    Báo cáo (tất cả)
                   </label>
                 </fieldset>
                 <p class="card-desc">
@@ -613,7 +634,8 @@
             <article class="card">
               <h2>Danh sách tài khoản</h2>
               <p class="card-desc">
-                Quản trị viên có thể tuỳ ý thêm hoặc xoá quyền cho từng tài khoản nhân viên rồi bấm lưu để cập nhật.
+                Quản trị viên có thể thêm hoặc xoá quyền cho từng tài khoản nhân viên rồi bấm lưu để cập nhật. Quyền
+                `Giao dịch dịch vụ` đã bao gồm cả voucher và hoa hồng trong cùng một thao tác nhập.
               </p>
               <div class="table-wrap">
                 <table>

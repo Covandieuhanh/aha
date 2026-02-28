@@ -433,6 +433,34 @@ textarea:focus {
   font-size: 0.9rem;
 }
 
+.permission-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.permission-subgroup {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.permission-subgroup h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
+.permission-hint {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
 .checkbox-label {
   display: flex;
   gap: 8px;
@@ -456,6 +484,11 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 10px;
   max-width: 100%;
+}
+
+#user-table-body td.hidden,
+table thead th.hidden {
+  display: none;
 }
 
 .table-wrap-compact {
@@ -735,6 +768,14 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .permission-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .permission-subgroup {
+    padding: 10px;
+  }
+
   table {
     min-width: 100%;
   }
@@ -792,6 +833,10 @@ th {
   .result-box {
     font-size: 0.98rem;
     line-height: 1.45;
+  }
+
+  .permission-hint {
+    font-size: 0.9rem;
   }
 
   .primary-btn,
