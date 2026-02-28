@@ -383,6 +383,15 @@ function hasFeaturePermission(user, featureKey) {
   if (!user) return false;
   if (user.role === "admin") return true;
   if (featureKey === "manageUsers") return false;
+  if (featureKey === "referrals") {
+    return Boolean(user.permissions?.referrals || user.permissions?.visits);
+  }
+  if (featureKey === "referralsEdit") {
+    return Boolean(user.permissions?.referralsEdit || user.permissions?.visitsEdit);
+  }
+  if (featureKey === "referralsDelete") {
+    return Boolean(user.permissions?.referralsDelete || user.permissions?.visitsDelete);
+  }
   if (featureKey === "reports") {
     return Boolean(user.permissions?.reports || user.permissions?.reportsAll);
   }

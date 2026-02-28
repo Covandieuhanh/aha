@@ -333,6 +333,11 @@ function bindEvents() {
   });
 
   refs.userTableBody.addEventListener("click", handleUserTableClick);
+  refs.userTableBody.addEventListener("change", handleUserTableChange);
+
+  refs.permVisits.addEventListener("change", syncMemberCreateServicePermissions);
+  refs.permVisitsEdit.addEventListener("change", syncMemberCreateServicePermissions);
+  refs.permVisitsDelete.addEventListener("change", syncMemberCreateServicePermissions);
 
   if (refs.modalOkBtn) {
     refs.modalOkBtn.addEventListener("click", hideModal);
@@ -376,6 +381,7 @@ function setDefaultMemberPermissionInputs() {
   refs.permChangePassword.checked = false;
   refs.permReports.checked = true;
   refs.permReportsAll.checked = false;
+  syncMemberCreateServicePermissions();
 }
 
 function renderRuntimeMode() {
@@ -1138,6 +1144,15 @@ function hasFeaturePermission(user, featureKey) {
   if (!user) return false;
   if (isAdmin(user)) return true;
   if (featureKey === "manageUsers") return false;
+  if (featureKey === "referrals") {
+    return Boolean(user.permissions?.referrals || user.permissions?.visits);
+  }
+  if (featureKey === "referralsEdit") {
+    return Boolean(user.permissions?.referralsEdit || user.permissions?.visitsEdit);
+  }
+  if (featureKey === "referralsDelete") {
+    return Boolean(user.permissions?.referralsDelete || user.permissions?.visitsDelete);
+  }
   if (featureKey === "reports") {
     return Boolean(user.permissions?.reports || user.permissions?.reportsAll);
   }
@@ -2980,9 +2995,9 @@ function addMemberAccount() {
       visits: Boolean(refs.permVisits.checked),
       visitsEdit: Boolean(refs.permVisitsEdit.checked),
       visitsDelete: Boolean(refs.permVisitsDelete.checked),
-      referrals: Boolean(refs.permReferrals.checked),
-      referralsEdit: Boolean(refs.permReferralsEdit.checked),
-      referralsDelete: Boolean(refs.permReferralsDelete.checked),
+      referrals: Boolean(refs.permVisits.checked),
+      referralsEdit: Boolean(refs.permVisitsEdit.checked),
+      referralsDelete: Boolean(refs.permVisitsDelete.checked),
       dataCleanup: Boolean(refs.permDataCleanup.checked),
       backupData: Boolean(refs.permBackupData.checked),
       changePassword: Boolean(refs.permChangePassword.checked),
@@ -3041,9 +3056,9 @@ async function addMemberAccountRemote() {
           visits: Boolean(refs.permVisits.checked),
           visitsEdit: Boolean(refs.permVisitsEdit.checked),
           visitsDelete: Boolean(refs.permVisitsDelete.checked),
-          referrals: Boolean(refs.permReferrals.checked),
-          referralsEdit: Boolean(refs.permReferralsEdit.checked),
-          referralsDelete: Boolean(refs.permReferralsDelete.checked),
+          referrals: Boolean(refs.permVisits.checked),
+          referralsEdit: Boolean(refs.permVisitsEdit.checked),
+          referralsDelete: Boolean(refs.permVisitsDelete.checked),
           dataCleanup: Boolean(refs.permDataCleanup.checked),
           backupData: Boolean(refs.permBackupData.checked),
           changePassword: Boolean(refs.permChangePassword.checked),
@@ -3118,6 +3133,18 @@ function handleUserTableClick(event) {
   refs.memberFormResult.textContent = `Đã cập nhật quyền cho ${member.username}.`;
   showModal(refs.memberFormResult.textContent);
   renderUserAccounts();
+}
+
+function handleUserTableChange(event) {
+  const input = event.target.closest(".permission-toggle");
+  if (!input) return;
+
+  const permissionKey = input.dataset.permission || "";
+  if (!["visits", "visitsEdit", "visitsDelete"].includes(permissionKey)) {
+    return;
+  }
+
+  syncMemberRowServicePermissions(input.closest("tr"));
 }
 
 async function handleUserTableClickRemote(event) {
@@ -3348,6 +3375,33 @@ function renderVisitReferralField() {
   refs.visitReferrerGroup.classList.toggle("hidden", !canUseReferral);
   if (!canUseReferral) {
     refs.visitReferrer.value = "";
+  }
+}
+
+function syncMemberCreateServicePermissions() {
+  if (!refs.permReferrals || !refs.permReferralsEdit || !refs.permReferralsDelete) return;
+  refs.permReferrals.checked = Boolean(refs.permVisits.checked);
+  refs.permReferralsEdit.checked = Boolean(refs.permVisitsEdit.checked);
+  refs.permReferralsDelete.checked = Boolean(refs.permVisitsDelete.checked);
+}
+
+function syncMemberRowServicePermissions(row) {
+  if (!row) return;
+  const visitToggle = row.querySelector('input.permission-toggle[data-permission="visits"]');
+  const visitEditToggle = row.querySelector('input.permission-toggle[data-permission="visitsEdit"]');
+  const visitDeleteToggle = row.querySelector('input.permission-toggle[data-permission="visitsDelete"]');
+  const referralToggle = row.querySelector('input.permission-toggle[data-permission="referrals"]');
+  const referralEditToggle = row.querySelector('input.permission-toggle[data-permission="referralsEdit"]');
+  const referralDeleteToggle = row.querySelector('input.permission-toggle[data-permission="referralsDelete"]');
+
+  if (visitToggle && referralToggle) {
+    referralToggle.checked = visitToggle.checked;
+  }
+  if (visitEditToggle && referralEditToggle) {
+    referralEditToggle.checked = visitEditToggle.checked;
+  }
+  if (visitDeleteToggle && referralDeleteToggle) {
+    referralDeleteToggle.checked = visitDeleteToggle.checked;
   }
 }
 
@@ -3859,6 +3913,9 @@ function renderUserAccounts() {
     .map((user) => {
       const createdAt = new Date(user.createdAt).toLocaleString("vi-VN");
       const permissions = buildMemberPermissions(user.permissions);
+      const serviceAccess = permissions.visits || permissions.referrals;
+      const serviceEdit = permissions.visitsEdit || permissions.referralsEdit;
+      const serviceDelete = permissions.visitsDelete || permissions.referralsDelete;
       const deleteButtonCell =
         user.role === "member"
           ? `<button type="button" class="secondary-btn table-btn delete-member-btn" data-user-id="${escapeHtml(user.id)}">Xoá</button>`
@@ -3876,9 +3933,9 @@ function renderUserAccounts() {
             <td>Toàn quyền</td>
             <td>Toàn quyền</td>
             <td>Toàn quyền</td>
-            <td>Toàn quyền</td>
-            <td>Toàn quyền</td>
-            <td>Toàn quyền</td>
+            <td class="hidden">Toàn quyền</td>
+            <td class="hidden">Toàn quyền</td>
+            <td class="hidden">Toàn quyền</td>
             <td>Toàn quyền</td>
             <td>Toàn quyền</td>
             <td>Toàn quyền</td>
@@ -3907,12 +3964,12 @@ function renderUserAccounts() {
           ${renderPermissionCheckbox(user.id, "products", permissions.products)}
           ${renderPermissionCheckbox(user.id, "productsEdit", permissions.productsEdit)}
           ${renderPermissionCheckbox(user.id, "productsDelete", permissions.productsDelete)}
-          ${renderPermissionCheckbox(user.id, "visits", permissions.visits)}
-          ${renderPermissionCheckbox(user.id, "visitsEdit", permissions.visitsEdit)}
-          ${renderPermissionCheckbox(user.id, "visitsDelete", permissions.visitsDelete)}
-          ${renderPermissionCheckbox(user.id, "referrals", permissions.referrals)}
-          ${renderPermissionCheckbox(user.id, "referralsEdit", permissions.referralsEdit)}
-          ${renderPermissionCheckbox(user.id, "referralsDelete", permissions.referralsDelete)}
+          ${renderPermissionCheckbox(user.id, "visits", serviceAccess)}
+          ${renderPermissionCheckbox(user.id, "visitsEdit", serviceEdit)}
+          ${renderPermissionCheckbox(user.id, "visitsDelete", serviceDelete)}
+          ${renderPermissionCheckbox(user.id, "referrals", serviceAccess, "hidden")}
+          ${renderPermissionCheckbox(user.id, "referralsEdit", serviceEdit, "hidden")}
+          ${renderPermissionCheckbox(user.id, "referralsDelete", serviceDelete, "hidden")}
           ${renderPermissionCheckbox(user.id, "dataCleanup", permissions.dataCleanup)}
           ${renderPermissionCheckbox(user.id, "backupData", permissions.backupData)}
           <td><input type="checkbox" class="lock-toggle" data-user-id="${escapeHtml(user.id)}" ${user.locked ? "checked" : ""} /></td>
@@ -3938,8 +3995,8 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-function renderPermissionCheckbox(userId, key, checked) {
-  return `<td><input type="checkbox" class="permission-toggle" data-user-id="${escapeHtml(
+function renderPermissionCheckbox(userId, key, checked, cellClass = "") {
+  return `<td class="${escapeHtml(cellClass)}"><input type="checkbox" class="permission-toggle" data-user-id="${escapeHtml(
     userId,
   )}" data-permission="${escapeHtml(key)}" ${checked ? "checked" : ""} /></td>`;
 }
