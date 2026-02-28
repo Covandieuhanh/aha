@@ -277,8 +277,18 @@ function deleteProduct(ctx, productName) {
   return textOf(byId(ctx, 'product-form-result'));
 }
 
-function addVisit(ctx, { customerName, productName, date, revenue }) {
+function addVisit(ctx, { customerName, productName, date, revenue, referrerUsername = '' }) {
   openTab(ctx, 'visits');
+
+  if (referrerUsername) {
+    selectOptionByLabel(
+      byId(ctx, 'visit-referrer'),
+      (label) => label.includes(`(${referrerUsername})`) || label.includes(referrerUsername),
+      `Không tìm thấy người giới thiệu ${referrerUsername} trong form giao dịch dịch vụ`,
+    );
+  } else {
+    setValue(byId(ctx, 'visit-referrer'), '');
+  }
 
   selectOptionByLabel(
     byId(ctx, 'visit-customer'),

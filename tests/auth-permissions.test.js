@@ -24,8 +24,9 @@ describe('Auth & Permissions', () => {
 
     const visibleTabs = getVisibleTabIds(ctx);
     expect(visibleTabs).toEqual(
-      expect.arrayContaining(['customers', 'products', 'visits', 'referrals', 'reports', 'users']),
+      expect.arrayContaining(['customers', 'products', 'visits', 'reports', 'users']),
     );
+    expect(visibleTabs).not.toContain('referrals');
     expect(byId(ctx, 'session-user').textContent).toContain('Quản trị viên');
   });
 
@@ -62,7 +63,7 @@ describe('Auth & Permissions', () => {
     const updateMessage = updateMemberPermissions(ctx, '0900000002', {
       customers: true,
       products: true,
-      visits: false,
+      visits: true,
       referrals: true,
       reports: false,
     });
@@ -73,6 +74,6 @@ describe('Auth & Permissions', () => {
     login(ctx, '0900000002', '123456');
 
     const visibleTabs = getVisibleTabIds(ctx);
-    expect(visibleTabs).toEqual(['customers', 'products', 'referrals']);
+    expect(visibleTabs).toEqual(['customers', 'products', 'visits']);
   });
 });

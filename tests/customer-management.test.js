@@ -101,4 +101,19 @@ describe('Customer Management Permissions', () => {
 
     expect(getDataRows(ctx, 'customer-table-body')).toHaveLength(0);
   });
+
+  it('sorts customer list by name from A to Z', () => {
+    ctx = bootApp();
+
+    login(ctx, 'admin', 'admin123');
+    createCustomer(ctx, { name: 'Zeta' });
+    createCustomer(ctx, { name: 'Alpha' });
+    createCustomer(ctx, { name: 'Beta' });
+
+    const firstColumnValues = getDataRows(ctx, 'customer-table-body').map((row) =>
+      row.children[0]?.textContent.trim(),
+    );
+
+    expect(firstColumnValues).toEqual(['Alpha', 'Beta', 'Zeta']);
+  });
 });

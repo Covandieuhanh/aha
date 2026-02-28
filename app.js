@@ -42,6 +42,8 @@ const TAB_FEATURE_MAP = {
   users: "manageUsers",
 };
 
+const SUPPRESSED_TABS = new Set(["referrals"]);
+
 const MEMBER_PERMISSION_KEYS = [
   "customers",
   "customerEdit",
@@ -118,6 +120,9 @@ const refs = {
   productTableBody: document.getElementById("product-table-body"),
 
   visitForm: document.getElementById("visit-form"),
+  visitReferrerGroup: document.getElementById("visit-referrer-group"),
+  visitReferrer: document.getElementById("visit-referrer"),
+  visitReferrerOptions: document.getElementById("visit-referrer-options"),
   visitCustomer: document.getElementById("visit-customer"),
   visitCustomerOptions: document.getElementById("visit-customer-options"),
   visitProduct: document.getElementById("visit-product"),
@@ -156,6 +161,9 @@ const refs = {
   reportVisitSummary: document.getElementById("report-visit-summary"),
   reportTableBody: document.getElementById("report-table-body"),
   reportVisitTableBody: document.getElementById("report-visit-table-body"),
+  reportCustomerSearch: document.getElementById("report-customer-search"),
+  reportCustomerSearchOptions: document.getElementById("report-customer-search-options"),
+  reportCustomerHistoryBody: document.getElementById("report-customer-history-body"),
 
   maintenanceForm: document.getElementById("maintenance-form"),
   maintenanceFromDate: document.getElementById("maintenance-from-date"),
@@ -194,6 +202,7 @@ const refs = {
   permBackupData: document.getElementById("perm-backup-data"),
   permChangePassword: document.getElementById("perm-change-password"),
   permReports: document.getElementById("perm-reports"),
+  permReportsAll: document.getElementById("perm-reports-all"),
   memberFormResult: document.getElementById("member-form-result"),
   userTableBody: document.getElementById("user-table-body"),
   modalOverlay: document.getElementById("modal-overlay"),
@@ -303,6 +312,9 @@ function bindEvents() {
   if (refs.reportSearch) {
     refs.reportSearch.addEventListener("input", renderReport);
   }
+  if (refs.reportCustomerSearch) {
+    refs.reportCustomerSearch.addEventListener("input", renderReportCustomerHistory);
+  }
   refs.maintenanceForm.addEventListener("submit", (event) => {
     event.preventDefault();
     purgeDataByDateRange();
@@ -363,6 +375,7 @@ function setDefaultMemberPermissionInputs() {
   refs.permBackupData.checked = false;
   refs.permChangePassword.checked = false;
   refs.permReports.checked = true;
+  refs.permReportsAll.checked = false;
 }
 
 function renderRuntimeMode() {
@@ -1125,6 +1138,9 @@ function hasFeaturePermission(user, featureKey) {
   if (!user) return false;
   if (isAdmin(user)) return true;
   if (featureKey === "manageUsers") return false;
+  if (featureKey === "reports") {
+    return Boolean(user.permissions?.reports || user.permissions?.reportsAll);
+  }
   return Boolean(user.permissions?.[featureKey]);
 }
 
@@ -1193,20 +1209,21 @@ function applyTabPermissions() {
   const allowedTabs = Object.keys(TAB_FEATURE_MAP).filter((tabId) =>
     hasFeaturePermission(user, TAB_FEATURE_MAP[tabId]),
   );
+  const visibleTabs = allowedTabs.filter((tabId) => !SUPPRESSED_TABS.has(tabId));
 
   refs.tabs.forEach((btn) => {
-    const isAllowed = allowedTabs.includes(btn.dataset.tab);
+    const isAllowed = visibleTabs.includes(btn.dataset.tab);
     btn.classList.toggle("hidden", !isAllowed);
   });
 
-  if (allowedTabs.length === 0) {
+  if (visibleTabs.length === 0) {
     refs.noPermission.classList.remove("hidden");
     setActiveTab("");
     return;
   }
 
   refs.noPermission.classList.add("hidden");
-  const nextTab = allowedTabs.includes(state.activeTab) ? state.activeTab : allowedTabs[0];
+  const nextTab = visibleTabs.includes(state.activeTab) ? state.activeTab : visibleTabs[0];
   setActiveTab(nextTab);
 }
 
@@ -1305,6 +1322,32 @@ function getCustomerName(customerId) {
   return customer ? customer.name : "Không xác định";
 }
 
+function buildCustomerHistoryEntries(customerId) {
+  const visits = state.visits.filter((item) => item.customerId === customerId);
+  const referrals = state.referrals.filter((item) => item.referredCustomerId === customerId && item.referrerId);
+
+  return [
+    ...visits.map((item) => ({
+      date: item.date,
+      product: getProductName(item.productId),
+      occurrence: item.occurrence,
+      rate: item.rate,
+      revenue: item.revenue,
+      value: item.voucher,
+      type: "Voucher",
+    })),
+    ...referrals.map((item) => ({
+      date: item.date,
+      product: getProductName(item.productId),
+      occurrence: item.occurrence,
+      rate: item.rate,
+      revenue: item.revenue,
+      value: item.commission,
+      type: "Hoa hồng",
+    })),
+  ].sort(sortByLatest);
+}
+
 function getProductName(productId) {
   if (!productId) return "-";
   const product = state.products.find((item) => item.id === productId);
@@ -1370,6 +1413,11 @@ function resolveCustomerId(inputElement, optionsElement) {
   );
 }
 
+function resolveReportCustomerId() {
+  if (!refs.reportCustomerSearch) return "";
+  return resolveCustomerId(refs.reportCustomerSearch, refs.reportCustomerSearchOptions);
+}
+
 function resolveProductId(inputElement, optionsElement) {
   return resolveIdFromOptions(inputElement, optionsElement, state.products, (item) =>
     `${item.name}${item.code ? ` (${item.code})` : ""}`,
@@ -1383,6 +1431,122 @@ function resolveReferrerId(inputElement, optionsElement) {
     getMemberUsers(),
     (item) => `${item.fullName} (${item.username})`,
   );
+}
+
+function canUseReferralInVisitForm(user = getCurrentUser()) {
+  return hasFeaturePermission(user, "referrals");
+}
+
+function findLinkedReferralByVisitId(visitId) {
+  if (!visitId) return null;
+  return state.referrals.find((item) => item.sourceVisitId === visitId) || null;
+}
+
+function buildLinkedReferralValues(visitId, values) {
+  if (!visitId || !values?.referrerId) return null;
+
+  return {
+    referrerId: values.referrerId,
+    referredCustomerId: values.customerId,
+    productId: values.productId,
+    date: values.date,
+    revenue: values.revenue,
+    sourceVisitId: visitId,
+  };
+}
+
+function syncLinkedReferralForVisitLocal(visitId, values) {
+  const existingReferral = findLinkedReferralByVisitId(visitId);
+  if (!canUseReferralInVisitForm()) {
+    return existingReferral ? { referral: existingReferral } : null;
+  }
+
+  const referralValues = buildLinkedReferralValues(visitId, values);
+  if (!referralValues) {
+    if (existingReferral) {
+      state.referrals = state.referrals.filter((item) => item.id !== existingReferral.id);
+      return { removed: true };
+    }
+    return null;
+  }
+
+  if (existingReferral) {
+    existingReferral.referrerId = referralValues.referrerId;
+    existingReferral.referredCustomerId = referralValues.referredCustomerId;
+    existingReferral.referredName = "";
+    existingReferral.productId = referralValues.productId;
+    existingReferral.date = referralValues.date;
+    existingReferral.revenue = referralValues.revenue;
+    existingReferral.sourceVisitId = referralValues.sourceVisitId;
+    return { referral: existingReferral };
+  }
+
+  const referralRecord = {
+    id: createId("ref"),
+    referrerId: referralValues.referrerId,
+    referredCustomerId: referralValues.referredCustomerId,
+    referredName: "",
+    productId: referralValues.productId,
+    date: referralValues.date,
+    revenue: referralValues.revenue,
+    occurrence: 0,
+    rate: 0,
+    commission: 0,
+    sourceVisitId: referralValues.sourceVisitId,
+    createdAt: new Date().toISOString(),
+  };
+
+  state.referrals.unshift(referralRecord);
+  return { referral: referralRecord };
+}
+
+async function syncLinkedReferralForVisitRemote(visitId, values) {
+  if (!canUseReferralInVisitForm()) {
+    return findLinkedReferralByVisitId(visitId) ? { referral: findLinkedReferralByVisitId(visitId) } : null;
+  }
+
+  const existingReferral = findLinkedReferralByVisitId(visitId);
+  const referralValues = buildLinkedReferralValues(visitId, values);
+
+  if (!referralValues) {
+    if (existingReferral) {
+      await apiRequest(`/referrals/${encodeURIComponent(existingReferral.id)}`, {
+        method: "DELETE",
+      });
+      return { removed: true };
+    }
+    return null;
+  }
+
+  if (existingReferral) {
+    await apiRequest(`/referrals/${encodeURIComponent(existingReferral.id)}`, {
+      method: "PATCH",
+      body: referralValues,
+    });
+    return { referralId: existingReferral.id };
+  }
+
+  const payload = await apiRequest("/referrals", {
+    method: "POST",
+    body: referralValues,
+  });
+
+  return { referralId: payload?.referral?.id || "" };
+}
+
+function formatVisitWorkflowMessage(visit, referral) {
+  if (!visit) {
+    return "Đã ghi nhận giao dịch dịch vụ.";
+  }
+
+  const messageParts = [formatVisitMessage(visit)];
+  if (referral?.referrerId) {
+    messageParts.push(
+      `Hoa hồng giới thiệu: ${formatMoney(referral.commission)} cho ${getReferrerName(referral.referrerId)}.`,
+    );
+  }
+
+  return messageParts.join(" ");
 }
 
 function escapeCsvCell(value) {
@@ -1672,7 +1836,9 @@ function handleCancelProductEdit() {
 }
 
 function setVisitFormMode(editing) {
-  refs.visitSubmitBtn.textContent = editing ? "Lưu chỉnh sửa tích điểm voucher" : "Ghi nhận + tính voucher";
+  refs.visitSubmitBtn.textContent = editing
+    ? "Lưu chỉnh sửa giao dịch dịch vụ"
+    : "Lưu giao dịch + tính voucher / hoa hồng";
   refs.visitCancelBtn.classList.toggle("hidden", !editing);
 }
 
@@ -1777,12 +1943,6 @@ function removeCustomerData(customerId) {
 }
 
 function handleCustomerTableClick(event) {
-  const nameButton = event.target.closest(".customer-name-btn");
-  if (nameButton) {
-    showCustomerHistory(nameButton.dataset.customerId || "");
-    return;
-  }
-
   const editButton = event.target.closest(".edit-customer-btn");
   if (editButton) {
     prepareCustomerEdit(editButton.dataset.customerId || "");
@@ -2235,6 +2395,9 @@ function readVisitFormValues() {
 
   const customerId = resolveCustomerId(refs.visitCustomer, refs.visitCustomerOptions);
   const productId = resolveProductId(refs.visitProduct, refs.visitProductOptions);
+  const referrerId = canUseReferralInVisitForm()
+    ? resolveReferrerId(refs.visitReferrer, refs.visitReferrerOptions)
+    : "";
   const date = refs.visitDate.value;
   const revenue = unformatNumber(refs.visitRevenue.value);
 
@@ -2250,7 +2413,13 @@ function readVisitFormValues() {
     return null;
   }
 
-  return { customerId, productId, date, revenue };
+  const memberIds = new Set(getMemberUsers().map((user) => user.id));
+  if (referrerId && !memberIds.has(referrerId)) {
+    refs.visitResult.textContent = "Người giới thiệu phải là tài khoản thành viên do quản trị viên tạo.";
+    return null;
+  }
+
+  return { customerId, productId, referrerId: referrerId || "", date, revenue };
 }
 
 function formatVisitMessage(visit) {
@@ -2271,6 +2440,10 @@ function prepareVisitEdit(visitId) {
   }
 
   state.editingVisitId = visit.id;
+  const linkedReferral = findLinkedReferralByVisitId(visit.id);
+  if (refs.visitReferrer) {
+    refs.visitReferrer.value = linkedReferral?.referrerId ? getReferrerName(linkedReferral.referrerId) : "";
+  }
   refs.visitCustomer.value = getCustomerName(visit.customerId) || "";
   refs.visitProduct.value = getProductName(visit.productId) || "";
   refs.visitDate.value = visit.date || "";
@@ -2310,6 +2483,7 @@ function handleVisitTableClick(event) {
   }
 
   state.visits = state.visits.filter((item) => item.id !== visitId);
+  state.referrals = state.referrals.filter((item) => item.sourceVisitId !== visitId);
   normalizeAllRecords();
   if (state.editingVisitId === visitId) {
     resetVisitFormState();
@@ -2322,17 +2496,10 @@ function handleVisitTableClick(event) {
 
 async function deleteVisitRemote(visitId) {
   try {
-    const payload = await apiRequest(`/visits/${encodeURIComponent(visitId)}`, {
+    await apiRequest(`/visits/${encodeURIComponent(visitId)}`, {
       method: "DELETE",
     });
-
-    if (Array.isArray(payload?.visits)) {
-      state.visits = payload.visits;
-    } else {
-      state.visits = state.visits.filter((item) => item.id !== visitId);
-    }
-
-    normalizeAllRecords();
+    await syncFromServer({ preserveTab: true, silent: true });
     if (state.editingVisitId === visitId) {
       resetVisitFormState();
     }
@@ -2372,14 +2539,19 @@ function addVisit() {
     visit.productId = values.productId;
     visit.date = values.date;
     visit.revenue = values.revenue;
+    const referralOutcome = syncLinkedReferralForVisitLocal(editingVisitId, values);
     normalizeAllRecords();
     saveState();
     const savedVisit = state.visits.find((item) => item.id === editingVisitId);
+    const savedReferral = findLinkedReferralByVisitId(editingVisitId);
     resetVisitFormState();
     refs.visitResult.textContent = savedVisit
-      ? `Đã cập nhật. ${formatVisitMessage(savedVisit)}`
+      ? `Đã cập nhật. ${formatVisitWorkflowMessage(savedVisit, referralOutcome?.removed ? null : savedReferral)}`
       : "Đã cập nhật giao dịch tích điểm.";
+    showModal(refs.visitResult.textContent);
     renderVisits();
+    renderReferrals();
+    renderReport();
     return;
   }
 
@@ -2396,14 +2568,20 @@ function addVisit() {
   };
 
   state.visits.unshift(visitRecord);
-  normalizeVisitMonth(values.customerId, monthOf(values.date));
+  syncLinkedReferralForVisitLocal(visitRecord.id, values);
+  normalizeAllRecords();
   const savedVisit = state.visits.find((item) => item.id === visitRecord.id);
+  const savedReferral = findLinkedReferralByVisitId(visitRecord.id);
   saveState();
 
   refs.visitRevenue.value = "";
-  refs.visitResult.textContent = savedVisit ? formatVisitMessage(savedVisit) : "Đã ghi nhận giao dịch tích điểm.";
+  refs.visitResult.textContent = savedVisit
+    ? formatVisitWorkflowMessage(savedVisit, savedReferral)
+    : "Đã ghi nhận giao dịch tích điểm.";
   showModal(refs.visitResult.textContent);
   renderVisits();
+  renderReferrals();
+  renderReport();
 }
 
 async function addVisitRemote() {
@@ -2420,26 +2598,22 @@ async function addVisitRemote() {
     }
 
     try {
-      const payload = await apiRequest(`/visits/${encodeURIComponent(editingVisitId)}`, {
+      await apiRequest(`/visits/${encodeURIComponent(editingVisitId)}`, {
         method: "PATCH",
         body: values,
       });
-
-      if (Array.isArray(payload?.visits)) {
-        state.visits = payload.visits;
-      } else if (payload?.visit) {
-        state.visits = state.visits.map((item) => (item.id === payload.visit.id ? payload.visit : item));
-      } else {
-        await syncFromServer({ preserveTab: true, silent: true });
-      }
-
-      normalizeAllRecords();
+      await syncLinkedReferralForVisitRemote(editingVisitId, values);
+      await syncFromServer({ preserveTab: true, silent: true });
       const savedVisit = state.visits.find((item) => item.id === editingVisitId);
+      const savedReferral = findLinkedReferralByVisitId(editingVisitId);
       resetVisitFormState();
       refs.visitResult.textContent = savedVisit
-        ? `Đã cập nhật. ${formatVisitMessage(savedVisit)}`
+        ? `Đã cập nhật. ${formatVisitWorkflowMessage(savedVisit, savedReferral)}`
         : "Đã cập nhật giao dịch tích điểm.";
+      showModal(refs.visitResult.textContent);
       renderVisits();
+      renderReferrals();
+      renderReport();
     } catch (error) {
       handleRemoteActionError(error, refs.visitResult, "Không thể cập nhật giao dịch tích điểm.");
     }
@@ -2452,21 +2626,22 @@ async function addVisitRemote() {
       method: "POST",
       body: values,
     });
-
-    if (Array.isArray(payload?.visits)) {
-      state.visits = payload.visits;
-      normalizeAllRecords();
-    } else if (payload?.visit) {
-      state.visits.unshift(payload.visit);
-      normalizeVisitMonth(values.customerId, monthOf(values.date));
-    } else {
-      await syncFromServer({ preserveTab: true, silent: true });
+    const visitId = payload?.visit?.id || "";
+    if (visitId) {
+      await syncLinkedReferralForVisitRemote(visitId, values);
     }
+    await syncFromServer({ preserveTab: true, silent: true });
 
-    const savedVisit = state.visits.find((item) => item.id === payload?.visit?.id) || payload?.visit;
+    const savedVisit = state.visits.find((item) => item.id === visitId) || payload?.visit;
+    const savedReferral = findLinkedReferralByVisitId(visitId);
     refs.visitRevenue.value = "";
-    refs.visitResult.textContent = savedVisit ? formatVisitMessage(savedVisit) : "Đã ghi nhận giao dịch tích điểm.";
+    refs.visitResult.textContent = savedVisit
+      ? formatVisitWorkflowMessage(savedVisit, savedReferral)
+      : "Đã ghi nhận giao dịch tích điểm.";
+    showModal(refs.visitResult.textContent);
     renderVisits();
+    renderReferrals();
+    renderReport();
   } catch (error) {
     handleRemoteActionError(error, refs.visitResult, "Không thể ghi nhận giao dịch tích điểm.");
   }
@@ -2812,6 +2987,7 @@ function addMemberAccount() {
       backupData: Boolean(refs.permBackupData.checked),
       changePassword: Boolean(refs.permChangePassword.checked),
       reports: Boolean(refs.permReports.checked),
+      reportsAll: Boolean(refs.permReportsAll.checked),
     },
     createdAt: new Date().toISOString(),
   };
@@ -2872,6 +3048,7 @@ async function addMemberAccountRemote() {
           backupData: Boolean(refs.permBackupData.checked),
           changePassword: Boolean(refs.permChangePassword.checked),
           reports: Boolean(refs.permReports.checked),
+          reportsAll: Boolean(refs.permReportsAll.checked),
         },
       },
     });
@@ -3105,6 +3282,7 @@ function renderAll() {
 function renderCustomerOptions() {
   const prevVisitValue = refs.visitCustomer.value;
   const prevReferredValue = refs.referredCustomer.value;
+  const prevReportCustomerValue = refs.reportCustomerSearch?.value;
   const options = state.customers
     .map(
       (customer) =>
@@ -3114,9 +3292,15 @@ function renderCustomerOptions() {
 
   refs.visitCustomerOptions.innerHTML = options;
   refs.referredCustomerOptions.innerHTML = options;
+  if (refs.reportCustomerSearchOptions) {
+    refs.reportCustomerSearchOptions.innerHTML = options;
+  }
 
   refs.visitCustomer.value = prevVisitValue;
   refs.referredCustomer.value = prevReferredValue;
+  if (refs.reportCustomerSearch) {
+    refs.reportCustomerSearch.value = prevReportCustomerValue || "";
+  }
 }
 
 function renderProductOptions() {
@@ -3138,6 +3322,7 @@ function renderProductOptions() {
 
 function renderReferrerOptions() {
   const prevReferrerValue = refs.referrerUser.value;
+  const prevVisitReferrerValue = refs.visitReferrer?.value;
   const options = getMemberUsers()
     .map(
       (member) =>
@@ -3146,8 +3331,24 @@ function renderReferrerOptions() {
     .join("");
 
   refs.referrerUserOptions.innerHTML = options;
+  if (refs.visitReferrerOptions) {
+    refs.visitReferrerOptions.innerHTML = options;
+  }
 
   refs.referrerUser.value = prevReferrerValue;
+  if (refs.visitReferrer) {
+    refs.visitReferrer.value = prevVisitReferrerValue || "";
+  }
+  renderVisitReferralField();
+}
+
+function renderVisitReferralField() {
+  if (!refs.visitReferrerGroup || !refs.visitReferrer) return;
+  const canUseReferral = canUseReferralInVisitForm();
+  refs.visitReferrerGroup.classList.toggle("hidden", !canUseReferral);
+  if (!canUseReferral) {
+    refs.visitReferrer.value = "";
+  }
 }
 
 function renderCustomers() {
@@ -3156,13 +3357,15 @@ function renderCustomers() {
   const canDelete = canDeleteCustomer(currentUser);
 
   const query = normalizeTextValue(refs.customerSearch?.value || "");
-  const rows = state.customers.filter((item) => {
-    if (!query) return true;
-    const haystack = normalizeTextValue(
-      `${item.name || ""} ${item.phone || ""} ${item.email || ""} ${item.note || ""}`,
-    );
-    return haystack.includes(query);
-  });
+  const rows = state.customers
+    .filter((item) => {
+      if (!query) return true;
+      const haystack = normalizeTextValue(
+        `${item.name || ""} ${item.phone || ""} ${item.email || ""} ${item.note || ""}`,
+      );
+      return haystack.includes(query);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "vi"));
 
   if (rows.length === 0) {
     refs.customerTableBody.innerHTML = '<tr><td class="empty-cell" colspan="6">Chưa có khách hàng nào.</td></tr>';
@@ -3187,11 +3390,11 @@ function renderCustomers() {
 
         return `
       <tr>
-        <td><button type="button" class="link-btn customer-name-btn" data-customer-id="${escapeHtml(item.id)}">${escapeHtml(item.name)}</button></td>
-        <td>${escapeHtml(item.phone || "-")}</td>
-        <td>${escapeHtml(item.email || "-")}</td>
-        <td>${escapeHtml(item.note || "-")}</td>
-        <td>${new Date(item.createdAt).toLocaleString("vi-VN")}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td class="truncate">${escapeHtml(item.phone || "-")}</td>
+        <td class="truncate">${escapeHtml(item.email || "-")}</td>
+        <td class="truncate">${escapeHtml(item.note || "-")}</td>
+        <td>${new Date(item.createdAt).toLocaleDateString("vi-VN")}</td>
         <td>${actions.length ? actions.join(" ") : "-"}</td>
       </tr>
     `;
@@ -3391,6 +3594,7 @@ function renderReport() {
       refs.reportVisitTableBody.innerHTML =
         '<tr><td class="empty-cell" colspan="7">Vui lòng đăng nhập.</td></tr>';
     }
+    renderReportCustomerHistory(true);
     return;
   }
 
@@ -3539,6 +3743,51 @@ function renderReport() {
       refs.reportVisitSummary.innerHTML = "";
     }
   }
+
+  renderReportCustomerHistory(false);
+}
+
+function renderReportCustomerHistory(skipUserCheck = false) {
+  if (!refs.reportCustomerHistoryBody || !refs.reportCustomerSearch) return;
+  const currentUser = getCurrentUser();
+  if (!skipUserCheck && !currentUser) {
+    refs.reportCustomerHistoryBody.innerHTML =
+      '<tr><td class="empty-cell" colspan="8">Vui lòng đăng nhập.</td></tr>';
+    return;
+  }
+
+  const customerId = resolveReportCustomerId();
+  if (!customerId) {
+    refs.reportCustomerHistoryBody.innerHTML =
+      '<tr><td class="empty-cell" colspan="8">Chọn khách hàng để xem lịch sử dịch vụ.</td></tr>';
+    return;
+  }
+
+  const entries = buildCustomerHistoryEntries(customerId);
+  if (entries.length === 0) {
+    refs.reportCustomerHistoryBody.innerHTML =
+      '<tr><td class="empty-cell" colspan="8">Chưa có giao dịch cho khách này.</td></tr>';
+    return;
+  }
+
+  const rows = entries
+    .map(
+      (item) => `
+      <tr>
+        <td>${formatDate(item.date)}</td>
+        <td>${escapeHtml(getCustomerName(customerId))}</td>
+        <td>${escapeHtml(item.product)}</td>
+        <td>Lần ${item.occurrence}</td>
+        <td>${formatPercent(item.rate)}</td>
+        <td>${formatMoney(item.revenue)}</td>
+        <td>${formatMoney(item.value)}</td>
+        <td>${item.type}</td>
+      </tr>
+    `,
+    )
+    .join("");
+
+  refs.reportCustomerHistoryBody.innerHTML = rows;
 }
 
 function showCustomerHistory(customerId) {
@@ -3549,26 +3798,25 @@ function showCustomerHistory(customerId) {
     refs.historyTitle.textContent = title;
   }
 
-  const visits = state.visits
-    .filter((item) => item.customerId === customerId)
-    .sort(sortByLatest);
+  const combined = buildCustomerHistoryEntries(customerId);
 
-  if (visits.length === 0) {
-    refs.historyContent.innerHTML = "<p>Chưa có giao dịch tích điểm voucher cho khách này.</p>";
+  if (combined.length === 0) {
+    refs.historyContent.innerHTML = "<p>Chưa có giao dịch cho khách này.</p>";
     showHistoryModal();
     return;
   }
 
-  const rows = visits
+  const rows = combined
     .map(
       (item) => `
         <tr>
           <td>${formatDate(item.date)}</td>
-          <td>${escapeHtml(getProductName(item.productId))}</td>
+          <td>${escapeHtml(item.product)}</td>
           <td>Lần ${item.occurrence}</td>
           <td>${formatPercent(item.rate)}</td>
           <td>${formatMoney(item.revenue)}</td>
-          <td>${formatMoney(item.voucher)}</td>
+          <td>${formatMoney(item.value)}</td>
+          <td>${item.type}</td>
         </tr>
       `,
     )
@@ -3583,7 +3831,8 @@ function showCustomerHistory(customerId) {
           <th>Lần</th>
           <th>Tỷ lệ</th>
           <th>Doanh thu</th>
-          <th>Voucher</th>
+          <th>Giá trị</th>
+          <th>Loại</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -3765,6 +4014,7 @@ function normalizeAllRecords() {
     if (typeof item.referredCustomerId !== "string") item.referredCustomerId = "";
     if (typeof item.referredName !== "string") item.referredName = "";
     if (typeof item.productId !== "string") item.productId = "";
+    if (typeof item.sourceVisitId !== "string") item.sourceVisitId = "";
 
     if (!item.referrerId) {
       item.occurrence = 0;

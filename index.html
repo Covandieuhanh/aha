@@ -59,8 +59,7 @@
           <select id="tab-selector">
             <option value="customers">Thông tin khách hàng</option>
             <option value="products">Sản phẩm dịch vụ</option>
-            <option value="visits">Tích điểm voucher</option>
-            <option value="referrals">Hoa hồng giới thiệu</option>
+            <option value="visits">Giao dịch dịch vụ</option>
             <option value="reports">Báo cáo chi tiết</option>
             <option value="maintenance">Quản trị dữ liệu theo khoảng thời gian</option>
             <option value="account">Thay đổi mật khẩu</option>
@@ -71,8 +70,8 @@
         <nav class="tabs" aria-label="Các mục quản trị">
           <button class="tab-btn" data-tab="customers" data-feature="customers">Thông tin khách hàng</button>
           <button class="tab-btn" data-tab="products" data-feature="products">Sản phẩm dịch vụ</button>
-          <button class="tab-btn" data-tab="visits" data-feature="visits">Tích điểm voucher</button>
-          <button class="tab-btn" data-tab="referrals" data-feature="referrals">Hoa hồng giới thiệu</button>
+          <button class="tab-btn" data-tab="visits" data-feature="visits">Giao dịch dịch vụ</button>
+          <button class="tab-btn hidden" data-tab="referrals" data-feature="referrals">Hoa hồng giới thiệu</button>
           <button class="tab-btn" data-tab="reports" data-feature="reports">Báo cáo chi tiết</button>
           <button class="tab-btn" data-tab="maintenance" data-feature="dataCleanup">Quản trị dữ liệu theo khoảng thời gian</button>
           <button class="tab-btn" data-tab="account" data-feature="changePassword">Thay đổi mật khẩu</button>
@@ -136,7 +135,7 @@
               <div class="table-controls">
                 <input type="search" id="customer-search" placeholder="Tìm khách theo tên, điện thoại, email, ghi chú" />
               </div>
-              <div class="table-wrap">
+              <div class="table-wrap table-wrap-compact">
                 <table>
                   <thead>
                     <tr>
@@ -208,11 +207,17 @@
         <section class="tab-panel" id="tab-visits">
           <div class="panel-grid">
             <article class="card">
-              <h2>Ghi nhận lượt khách đến Aha</h2>
+              <h2>Ghi nhận giao dịch dịch vụ</h2>
               <p class="card-desc">
-                Chính sách: lần 1 = 5%, lần 2 = 10%, ..., lần 9 = 45%, từ lần 10 trở lên = 50%.
+                Mỗi giao dịch sẽ tự tính voucher cho khách hàng. Nếu chọn thêm người giới thiệu, hệ thống sẽ tự ghi nhận
+                hoa hồng giới thiệu ngay trong cùng lần lưu.
               </p>
               <form id="visit-form" class="form-grid">
+                <label id="visit-referrer-group">
+                  Người giới thiệu (nếu có)
+                  <input type="text" id="visit-referrer" list="visit-referrer-options" placeholder="Chọn tài khoản thành viên" />
+                  <datalist id="visit-referrer-options"></datalist>
+                </label>
                 <label>
                   Khách hàng
                   <input type="text" id="visit-customer" list="visit-customer-options" required />
@@ -232,7 +237,7 @@
                   <input type="text" inputmode="decimal" id="visit-revenue" required placeholder="Ví dụ: 2000000" />
                 </label>
                 <div class="form-actions">
-                  <button type="submit" id="visit-submit-btn" class="primary-btn">Ghi nhận + tính voucher</button>
+                  <button type="submit" id="visit-submit-btn" class="primary-btn">Lưu giao dịch + tính voucher / hoa hồng</button>
                   <button type="button" id="visit-cancel-btn" class="secondary-btn hidden">Huỷ chỉnh sửa</button>
                 </div>
               </form>
@@ -400,6 +405,34 @@
                 </table>
               </div>
             </article>
+
+            <article class="card">
+              <div class="card-head-inline">
+                <h2>Lịch sử dịch vụ của khách hàng</h2>
+                <div class="inline-filter">
+                  <label class="sr-only" for="report-customer-search">Chọn khách hàng</label>
+                  <input type="search" id="report-customer-search" list="report-customer-search-options" class="inline-search" placeholder="Tìm khách hàng" />
+                  <datalist id="report-customer-search-options"></datalist>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ngày</th>
+                      <th>Khách hàng</th>
+                      <th>Sản phẩm / dịch vụ</th>
+                      <th>Lần</th>
+                      <th>Tỷ lệ</th>
+                      <th>Doanh thu</th>
+                      <th>Giá trị</th>
+                      <th>Loại</th>
+                    </tr>
+                  </thead>
+                  <tbody id="report-customer-history-body"></tbody>
+                </table>
+              </div>
+            </article>
           </div>
         </section>
 
@@ -560,9 +593,17 @@
                   </label>
                   <label class="checkbox-label">
                     <input type="checkbox" id="perm-reports" checked />
-                    Báo cáo chi tiết
+                    Báo cáo (của mình)
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="perm-reports-all" />
+                    Báo cáo (tất cả)
                   </label>
                 </fieldset>
+                <p class="card-desc">
+                  `Báo cáo (của mình)` chỉ xem dữ liệu báo cáo liên quan đến chính tài khoản nhân viên đó.
+                  `Báo cáo (tất cả)` xem toàn bộ tab báo cáo chi tiết như quản trị viên.
+                </p>
 
                 <button type="submit" class="primary-btn">Tạo tài khoản thành viên</button>
               </form>
@@ -595,7 +636,7 @@
                       <th>Sao lưu dữ liệu</th>
                       <th>Khoá</th>
                       <th>Thay đổi mật khẩu</th>
-                      <th>Báo cáo</th>
+                      <th>Báo cáo (của mình)</th>
                       <th>Báo cáo (tất cả)</th>
                       <th>Đặt lại mật khẩu</th>
                       <th>Xoá tài khoản</th>

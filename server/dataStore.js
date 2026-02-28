@@ -197,6 +197,7 @@ function normalizeAllRecords(state) {
           referrerId: typeof item.referrerId === "string" ? item.referrerId : "",
           referredCustomerId: typeof item.referredCustomerId === "string" ? item.referredCustomerId : "",
           referredName: typeof item.referredName === "string" ? item.referredName : "",
+          sourceVisitId: typeof item.sourceVisitId === "string" ? item.sourceVisitId : "",
           productId: typeof item.productId === "string" ? item.productId : "",
           date: typeof item.date === "string" ? item.date : "",
           revenue: Number(item.revenue) > 0 ? Number(item.revenue) : 0,
@@ -379,6 +380,9 @@ function hasFeaturePermission(user, featureKey) {
   if (!user) return false;
   if (user.role === "admin") return true;
   if (featureKey === "manageUsers") return false;
+  if (featureKey === "reports") {
+    return Boolean(user.permissions?.reports || user.permissions?.reportsAll);
+  }
   return Boolean(user.permissions?.[featureKey]);
 }
 
@@ -422,6 +426,10 @@ function getReferralsForClient(requestUser) {
     return state.referrals;
   }
 
+  if (hasFeaturePermission(requestUser, "reportsAll")) {
+    return state.referrals;
+  }
+
   if (hasFeaturePermission(requestUser, "referrals")) {
     return state.referrals;
   }
@@ -450,7 +458,10 @@ function getBootstrapForUser(requestUser) {
     currentUser: safeUser(requestUser),
     customers: canSeeCustomers ? clone(state.customers) : [],
     products: canSeeProducts ? clone(state.products) : [],
-    visits: hasFeaturePermission(requestUser, "visits") ? clone(state.visits) : [],
+    visits:
+      hasFeaturePermission(requestUser, "visits") || hasFeaturePermission(requestUser, "reportsAll")
+        ? clone(state.visits)
+        : [],
     referrals: clone(getReferralsForClient(requestUser)),
     users: clone(getUsersForClient(requestUser)),
   };
@@ -787,6 +798,7 @@ function deleteVisit(requestUser, visitId) {
   }
 
   state.visits = state.visits.filter((item) => item.id !== visitId);
+  state.referrals = state.referrals.filter((item) => item.sourceVisitId !== visitId);
   normalizeAllRecords(state);
   persist();
 
@@ -801,6 +813,7 @@ function addReferral(requestUser, input) {
 
   const referrerId = typeof input?.referrerId === "string" ? input.referrerId : "";
   const referredCustomerId = typeof input?.referredCustomerId === "string" ? input.referredCustomerId : "";
+  const sourceVisitId = typeof input?.sourceVisitId === "string" ? input.sourceVisitId : "";
   const productId = typeof input?.productId === "string" ? input.productId : "";
   const date = typeof input?.date === "string" ? input.date : "";
   const revenue = Number(input?.revenue || 0);
@@ -828,6 +841,7 @@ function addReferral(requestUser, input) {
     referrerId: referrerId || "",
     referredCustomerId,
     referredName: "",
+    sourceVisitId,
     productId,
     date,
     revenue,
@@ -863,6 +877,7 @@ function updateReferral(requestUser, referralId, input) {
 
   const referrerId = typeof input?.referrerId === "string" ? input.referrerId : "";
   const referredCustomerId = typeof input?.referredCustomerId === "string" ? input.referredCustomerId : "";
+  const sourceVisitId = typeof input?.sourceVisitId === "string" ? input.sourceVisitId : referral.sourceVisitId || "";
   const productId = typeof input?.productId === "string" ? input.productId : "";
   const date = typeof input?.date === "string" ? input.date : "";
   const revenue = Number(input?.revenue || 0);
@@ -888,6 +903,7 @@ function updateReferral(requestUser, referralId, input) {
   referral.referrerId = referrerId || "";
   referral.referredCustomerId = referredCustomerId;
   referral.referredName = "";
+  referral.sourceVisitId = sourceVisitId;
   referral.productId = productId;
   referral.date = date;
   referral.revenue = revenue;

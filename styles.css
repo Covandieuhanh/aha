@@ -53,8 +53,9 @@ body {
 }
 
 .container {
-  width: min(1200px, 94%);
-  margin: 24px auto 48px;
+  width: min(1100px, 96%);
+  margin: 20px auto 40px;
+  padding: 0 10px;
 }
 
 .auth-view {
@@ -284,7 +285,7 @@ textarea {
   border-radius: 10px;
   padding: 10px 12px;
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
 }
 
 input:focus,
@@ -343,6 +344,7 @@ textarea:focus {
   gap: 12px;
   align-items: center;
   margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 
 .inline-filter {
@@ -354,6 +356,15 @@ textarea:focus {
 
 .inline-filter input {
   width: auto;
+}
+
+.card-head-inline .inline-search {
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.card-head-inline .inline-filter {
+  flex: 0 0 auto;
 }
 
 .summary-row {
@@ -418,6 +429,11 @@ textarea:focus {
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--line);
   border-radius: 10px;
+}
+
+.table-wrap-compact {
+  max-height: 440px;
+  min-height: 180px;
 }
 
 .table-controls {
@@ -501,10 +517,17 @@ textarea:focus {
   text-align: left;
 }
 
+.truncate {
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 980px;
+  min-width: 860px;
   background: #fff;
 }
 
@@ -570,8 +593,9 @@ th {
   }
 
   .container {
-    width: min(100%, 96%);
-    margin: 14px auto 24px;
+    width: 100%;
+    margin: 12px auto 20px;
+    padding: 0 12px;
   }
 
   .auth-card,
@@ -608,7 +632,7 @@ th {
   }
 
   table {
-    min-width: 720px;
+    min-width: 100%;
   }
 
   th,
@@ -641,6 +665,11 @@ th {
   }
 
   table {
-    min-width: 640px;
+    min-width: 100%;
+  }
+
+  .inline-search {
+    width: 100%;
+    min-width: 0;
   }
 }

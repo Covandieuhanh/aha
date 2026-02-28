@@ -1,5 +1,6 @@
 const {
   addReferral,
+  addVisit,
   bootApp,
   closeApp,
   createCustomer,
@@ -12,6 +13,7 @@ const {
   logout,
   monthFromUi,
   textOf,
+  updateMemberPermissions,
 } = require('./helpers/appHarness');
 
 describe('Employee Detailed Report', () => {
@@ -74,5 +76,66 @@ describe('Employee Detailed Report', () => {
 
     const summaryText = textOf(ctx.document.getElementById('report-summary'));
     expect(summaryText).toContain('Số giao dịch nhận hoa hồng');
+  });
+
+  it('allows report all permission to view the full detailed report', () => {
+    ctx = bootApp();
+
+    login(ctx, 'admin', 'admin123');
+
+    createMember(ctx, {
+      fullName: 'Nhân viên Toàn Bộ',
+      username: '0911111199',
+      password: '123456',
+    });
+
+    updateMemberPermissions(ctx, '0911111199', {
+      reports: false,
+      reportsAll: true,
+      customers: false,
+      products: false,
+      visits: false,
+      referrals: false,
+    });
+
+    createCustomer(ctx, { name: 'Khách R1' });
+    createCustomer(ctx, { name: 'Khách R2' });
+    createProduct(ctx, { name: 'Gói Tổng Hợp', code: 'TH01', defaultPrice: 800000 });
+
+    const monthValue = monthFromUi(ctx);
+    const dateValue = dateInMonth(monthValue, 15);
+
+    addVisit(ctx, {
+      customerName: 'Khách R1',
+      productName: 'Gói Tổng Hợp',
+      date: dateValue,
+      revenue: 800000,
+    });
+
+    addReferral(ctx, {
+      referrerUsername: '0911111199',
+      referredCustomerName: 'Khách R1',
+      productName: 'Gói Tổng Hợp',
+      date: dateValue,
+      revenue: 800000,
+    });
+
+    addReferral(ctx, {
+      referrerUsername: '0911111199',
+      referredCustomerName: 'Khách R2',
+      productName: 'Gói Tổng Hợp',
+      date: dateValue,
+      revenue: 800000,
+    });
+
+    logout(ctx);
+    login(ctx, '0911111199', '123456');
+
+    const reportText = getRowTexts(ctx, 'report-table-body').join(' | ');
+    const visitSummaryText = textOf(ctx.document.getElementById('report-visit-summary'));
+
+    expect(reportText).toContain('Khách R1');
+    expect(reportText).toContain('Khách R2');
+    expect(visitSummaryText).toContain('Tổng voucher tích điểm');
   });
 });
