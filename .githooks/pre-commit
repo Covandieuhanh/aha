@@ -1,0 +1,23 @@
+#!/bin/sh
+# Auto-backup working tree before each commit.
+set -e
+
+ROOT_DIR="$(pwd)"
+DEST="$HOME/Documents/data-aha-backups"
+TS="$(date +%Y%m%d-%H%M%S)"
+ARCHIVE="$DEST/data-aha-$TS.tar.gz"
+
+mkdir -p "$DEST"
+
+# Create archive excluding heavyweight or generated folders.
+tar -czf "$ARCHIVE" \
+  --exclude='.git' \
+  --exclude='node_modules' \
+  --exclude='coverage' \
+  --exclude='dist' \
+  --exclude='backups' \
+  --exclude='backups-local' \
+  --exclude='*.tar.gz' \
+  -C "$ROOT_DIR" .
+
+echo "[backup] Saved $ARCHIVE"

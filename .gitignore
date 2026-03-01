@@ -3,3 +3,6 @@ dist/
 coverage/
 .env
 .DS_Store
+backups/
+backups-local/
+/Users/duccuongtran/Documents/data-aha-backups/
