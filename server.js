@@ -317,9 +317,13 @@ app.post("/api/referrals", requireAuth, (req, res) => {
     const referrerId = payload?.referral?.referrerId;
     if (referrerId) {
       const actor = req.user?.fullName || "Hệ thống AHA";
+      const amount = payload?.referral?.commission || 0;
+      const amountLabel = typeof amount === "number" && amount > 0 ? formatMoneyVnd(amount) : "";
+      const staffName = findUserById(referrerId)?.fullName || "Nhân viên";
+
       void sendPushToUser(referrerId, {
         title: "AHA",
-        body: `${actor} vừa ghi nhận giao dịch giới thiệu của bạn.`,
+        body: `Ghi nhận giao dịch dịch vụ hoa hồng giới thiệu: ${amountLabel} cho ${staffName}.`,
         url: "/",
         icon: "/icons/icon-192.png",
       });
@@ -653,6 +657,11 @@ function signVapidToken(audience) {
   signer.update(data);
   const signature = toBase64Url(signer.sign(vapidKeys.privatePem));
   return `${data}.${signature}`;
+}
+
+function formatMoneyVnd(value) {
+  const n = Number(value) || 0;
+  return n.toLocaleString("vi-VN") + " đ";
 }
 
 async function sendPushPing(subscription) {
