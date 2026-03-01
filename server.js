@@ -52,7 +52,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-session-secret
 const COOKIE_NAME = "aha_session";
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
 const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
-const VAPID_SUBJECT = process.env.AHA_VAPID_SUBJECT || "mailto:admin@example.com";
+const VAPID_SUBJECT = (process.env.AHA_VAPID_SUBJECT || "mailto:admin@example.com").trim();
 const VAPID_FILE = path.join(__dirname, "data", "vapid.json");
 
 let webPush = null;
@@ -563,7 +563,11 @@ function loadOrCreateVapidKeys() {
 
 const vapidKeys = loadOrCreateVapidKeys();
 if (webPush) {
-  webPush.setVapidDetails(vapidKeys.subject, vapidKeys.publicKey, vapidKeys.privateKey);
+  // web-push yêu cầu subject phải là mailto:... hoặc https://...
+  const subject = vapidKeys.subject?.startsWith("mailto:") || vapidKeys.subject?.startsWith("http")
+    ? vapidKeys.subject
+    : `mailto:${vapidKeys.subject || "admin@example.com"}`;
+  webPush.setVapidDetails(subject, vapidKeys.publicKey, vapidKeys.privateKey);
 }
 
 function extractPrivateKeyBase64Url(privatePem) {
