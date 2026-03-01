@@ -52,7 +52,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-session-secret
 const COOKIE_NAME = "aha_session";
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
 const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
-const VAPID_SUBJECT = (process.env.AHA_VAPID_SUBJECT || "mailto:admin@example.com").trim();
+const VAPID_SUBJECT = (process.env.AHA_VAPID_SUBJECT || "mailto:admin@example.com").trim().replace(/^"+|"+$/g, "");
 const VAPID_FILE = path.join(__dirname, "data", "vapid.json");
 
 let webPush = null;
@@ -513,32 +513,42 @@ function fromBase64Url(str) {
 }
 
 function loadOrCreateVapidKeys() {
-  if (process.env.AHA_VAPID_PUBLIC_KEY && process.env.AHA_VAPID_PRIVATE_KEY) {
-    const publicKey = process.env.AHA_VAPID_PUBLIC_KEY.trim();
-    const privateRaw = process.env.AHA_VAPID_PRIVATE_KEY.trim();
-    const privatePem = privateRaw.includes("BEGIN") ? privateRaw : null;
-    const privateKey = privatePem
-      ? extractPrivateKeyBase64Url(privatePem)
-      : privateRaw.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    return { publicKey, privatePem: privatePem || "", privateKey, subject: VAPID_SUBJECT };
+  const envPublic = process.env.AHA_VAPID_PUBLIC_KEY;
+  const envPrivate = process.env.AHA_VAPID_PRIVATE_KEY;
+
+  if (envPublic && envPrivate) {
+    const publicKey = envPublic.trim().replace(/^"+|"+$/g, "");
+    const privateRaw = envPrivate.trim().replace(/^"+|"+$/g, "").replace(/\\n/g, "\n");
+    const { privateKey, privatePem } = normalizePrivateKey(privateRaw);
+    if (privateKey) {
+      return { publicKey, privatePem: privatePem || "", privateKey, subject: VAPID_SUBJECT };
+    }
+    console.warn("[AHA] AHA_VAPID_PRIVATE_KEY không hợp lệ, sẽ tạo khoá mới.");
   }
 
   if (fs.existsSync(VAPID_FILE)) {
     try {
       const saved = JSON.parse(fs.readFileSync(VAPID_FILE, "utf8"));
       if (saved?.publicKey && saved?.privatePem) {
-        return {
-          publicKey: saved.publicKey,
-          privatePem: saved.privatePem,
-          privateKey: saved.privateKey || extractPrivateKeyBase64Url(saved.privatePem),
-          subject: saved.subject || VAPID_SUBJECT,
-        };
+        const privateKey = saved.privateKey || extractPrivateKeyBase64Url(saved.privatePem);
+        if (isValidPrivateKey(privateKey)) {
+          return {
+            publicKey: saved.publicKey,
+            privatePem: saved.privatePem,
+            privateKey,
+            subject: saved.subject || VAPID_SUBJECT,
+          };
+        }
       }
     } catch (error) {
       console.warn("[AHA] Không đọc được vapid.json, sẽ tạo khoá mới.");
     }
   }
 
+  return createAndPersistVapidPair();
+}
+
+function createAndPersistVapidPair() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
   const publicJwk = publicKey.export({ format: "jwk" });
   const rawPublic = Buffer.concat([Buffer.from([0x04]), fromBase64Url(publicJwk.x), fromBase64Url(publicJwk.y)]);
@@ -561,19 +571,51 @@ function loadOrCreateVapidKeys() {
   return { publicKey: publicKeyBase64Url, privatePem, privateKey: privateKeyBase64Url, subject: VAPID_SUBJECT };
 }
 
-const vapidKeys = loadOrCreateVapidKeys();
+let vapidKeys = loadOrCreateVapidKeys();
 if (webPush) {
   // web-push yêu cầu subject phải là mailto:... hoặc https://...
   const subject = vapidKeys.subject?.startsWith("mailto:") || vapidKeys.subject?.startsWith("http")
     ? vapidKeys.subject
     : `mailto:${vapidKeys.subject || "admin@example.com"}`;
-  webPush.setVapidDetails(subject, vapidKeys.publicKey, vapidKeys.privateKey);
+  try {
+    webPush.setVapidDetails(subject, vapidKeys.publicKey, vapidKeys.privateKey);
+  } catch (error) {
+    console.warn("[AHA] VAPID hiện tại không hợp lệ, tạo khoá mới. Lỗi:", error?.message);
+    vapidKeys = createAndPersistVapidPair();
+    const nextSubject = vapidKeys.subject?.startsWith("mailto:") || vapidKeys.subject?.startsWith("http")
+      ? vapidKeys.subject
+      : `mailto:${vapidKeys.subject || "admin@example.com"}`;
+    webPush.setVapidDetails(nextSubject, vapidKeys.publicKey, vapidKeys.privateKey);
+  }
 }
 
 function extractPrivateKeyBase64Url(privatePem) {
   const jwk = crypto.createPrivateKey(privatePem).export({ format: "jwk" });
   const d = jwk?.d || "";
   return d.replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+}
+
+function normalizePrivateKey(raw) {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return { privateKey: null, privatePem: null };
+
+  if (trimmed.includes("BEGIN")) {
+    const privatePem = trimmed;
+    const privateKey = extractPrivateKeyBase64Url(privatePem);
+    return isValidPrivateKey(privateKey) ? { privateKey, privatePem } : { privateKey: null, privatePem: null };
+  }
+
+  const base64url = trimmed.replace(/\\s+/g, "").replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  return isValidPrivateKey(base64url) ? { privateKey: base64url, privatePem: null } : { privateKey: null, privatePem: null };
+}
+
+function isValidPrivateKey(base64url) {
+  try {
+    const buf = Buffer.from(base64url.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+    return buf.length === 32;
+  } catch (error) {
+    return false;
+  }
 }
 
 function signVapidToken(audience) {
