@@ -323,8 +323,8 @@ app.post("/api/referrals", requireAuth, (req, res) => {
 
       void sendPushToUser(referrerId, {
         title: "AHA",
-        body: `Ghi nhận giao dịch dịch vụ hoa hồng giới thiệu: ${amountLabel} cho ${staffName}.`,
-        url: "/",
+        body: `Ghi nhận giao dịch dịch vụ hoa hồng giới thiệu: ${amountLabel} cho ${staffName}. (${actor})`,
+        url: "/#reports",
         icon: "/icons/icon-192.png",
       });
     }
