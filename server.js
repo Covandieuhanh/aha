@@ -312,6 +312,18 @@ app.post("/api/referrals", requireAuth, (req, res) => {
   try {
     const payload = addReferral(req.user, req.body);
     res.status(201).json(payload);
+
+    // Gửi push cho người giới thiệu nếu có
+    const referrerId = payload?.referral?.referrerId;
+    if (referrerId) {
+      const actor = req.user?.fullName || "Hệ thống AHA";
+      void sendPushToUser(referrerId, {
+        title: "AHA",
+        body: `${actor} vừa ghi nhận giao dịch giới thiệu của bạn.`,
+        url: "/",
+        icon: "/icons/icon-192.png",
+      });
+    }
   } catch (error) {
     sendApiError(res, error, "Không thể ghi nhận hoa hồng giới thiệu.");
   }
@@ -665,6 +677,27 @@ async function sendPushPing(subscription) {
     const status = error?.statusCode || error?.status || 500;
     return { ok: false, status, message: error?.body || error?.message || "send failed" };
   }
+}
+
+async function sendPushToUser(userId, notification) {
+  if (!webPush) return [];
+  const subs = getPushSubscriptionsForUser(userId);
+  const results = [];
+
+  for (const sub of subs) {
+    try {
+      const response = await webPush.sendNotification(sub, JSON.stringify(notification), { TTL: 3600 });
+      results.push({ endpoint: sub.endpoint, ok: true, status: response.statusCode || response.status });
+    } catch (error) {
+      const status = error?.statusCode || error?.status || 500;
+      if (status === 410 || status === 404 || status === 400) {
+        removePushSubscriptionByEndpoint(sub.endpoint);
+      }
+      results.push({ endpoint: sub.endpoint, ok: false, status, message: error?.body || error?.message });
+    }
+  }
+
+  return results;
 }
 
 process.on("SIGTERM", () => {
