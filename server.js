@@ -519,7 +519,7 @@ function loadOrCreateVapidKeys() {
     const privatePem = privateRaw.includes("BEGIN") ? privateRaw : null;
     const privateKey = privatePem
       ? extractPrivateKeyBase64Url(privatePem)
-      : privateRaw.replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+      : privateRaw.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     return { publicKey, privatePem: privatePem || "", privateKey, subject: VAPID_SUBJECT };
   }
 
