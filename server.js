@@ -592,7 +592,7 @@ if (webPush) {
 function extractPrivateKeyBase64Url(privatePem) {
   const jwk = crypto.createPrivateKey(privatePem).export({ format: "jwk" });
   const d = jwk?.d || "";
-  return d.replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  return d.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function normalizePrivateKey(raw) {
