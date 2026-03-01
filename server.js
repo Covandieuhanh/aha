@@ -37,6 +37,7 @@ const {
   upsertPushSubscription,
   getPushSubscriptionsForUser,
   removePushSubscriptionByEndpoint,
+  clearPushSubscriptions,
 } = require("./server/dataStore");
 const { createBackupManager } = require("./server/backupManager");
 const fs = require("fs");
@@ -429,6 +430,15 @@ app.post("/api/push/subscribe", requireAuth, (req, res) => {
   }
 });
 
+app.post("/api/push/subscribe/clear-all", requireAuth, (_req, res) => {
+  try {
+    clearPushSubscriptions();
+    res.json({ ok: true });
+  } catch (error) {
+    sendApiError(res, error, "Không thể xoá toàn bộ đăng ký push.");
+  }
+});
+
 app.post("/api/push/test", requireAuth, async (req, res) => {
   try {
     const subs = getPushSubscriptionsForUser(req.user.id);
@@ -442,6 +452,9 @@ app.post("/api/push/test", requireAuth, async (req, res) => {
       try {
         const result = await sendPushPing(sub);
         if (!result.ok && result.status === 410) {
+          removePushSubscriptionByEndpoint(sub.endpoint);
+        } else if (!result.ok && result.status === 400) {
+          // VAPID mismatch với endpoint cũ, xoá để client đăng ký lại
           removePushSubscriptionByEndpoint(sub.endpoint);
         }
         results.push({ endpoint: sub.endpoint, status: result.status, ok: result.ok, message: result.message });

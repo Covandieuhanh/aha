@@ -494,6 +494,12 @@ function removePushSubscriptionByEndpoint(endpoint) {
   return false;
 }
 
+function clearPushSubscriptions() {
+  if (state.pushSubscriptions.length === 0) return;
+  state.pushSubscriptions = [];
+  persist();
+}
+
 function verifyPassword(user, password) {
   if (!user || typeof password !== "string") return false;
   return bcrypt.compareSync(password, user.passwordHash);
@@ -1316,4 +1322,5 @@ module.exports = {
   upsertPushSubscription,
   getPushSubscriptionsForUser,
   removePushSubscriptionByEndpoint,
+  clearPushSubscriptions,
 };
