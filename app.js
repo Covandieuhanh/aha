@@ -488,8 +488,15 @@ async function handlePushButton() {
 
   if (Notification.permission === "granted") {
     try {
-      await apiRequest("/push/test", { method: "POST" });
-      refs.pushStatus.textContent = "Đã gửi thông báo thử (kiểm tra khay thông báo)";
+      const resp = await apiRequest("/push/test", { method: "POST" });
+      const first = Array.isArray(resp?.results) ? resp.results[0] : null;
+      if (first) {
+        refs.pushStatus.textContent = first.ok
+          ? `Đã gửi, mã ${first.status} (kiểm tra khay thông báo)`
+          : `Không gửi được (mã ${first.status}): ${first.message || first.error || ""}`;
+      } else {
+        refs.pushStatus.textContent = "Đã gửi thông báo thử";
+      }
     } catch (error) {
       refs.pushStatus.textContent = error?.message || "Không gửi được thông báo thử.";
     }

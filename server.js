@@ -55,6 +55,14 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
 const VAPID_SUBJECT = process.env.AHA_VAPID_SUBJECT || "mailto:admin@example.com";
 const VAPID_FILE = path.join(__dirname, "data", "vapid.json");
 
+let webPush = null;
+try {
+  // Lazy require so local dev không bị crash nếu chưa cài (Railway sẽ cài đủ).
+  webPush = require("web-push");
+} catch (error) {
+  console.warn("[AHA] web-push chưa được cài. Hãy chạy `npm install` trước khi gửi thông báo.");
+}
+
 const backupManager = createBackupManager({
   dataFile: DATA_FILE,
   logger: console,
@@ -436,11 +444,16 @@ app.post("/api/push/test", requireAuth, async (req, res) => {
         if (!result.ok && result.status === 410) {
           removePushSubscriptionByEndpoint(sub.endpoint);
         }
-        results.push({ endpoint: sub.endpoint, status: result.status, ok: result.ok });
+        results.push({ endpoint: sub.endpoint, status: result.status, ok: result.ok, message: result.message });
       } catch (error) {
         results.push({ endpoint: sub.endpoint, status: 500, ok: false, error: error?.message });
       }
     }
+
+    console.log("[AHA] push test", {
+      userId: req.user.id,
+      results,
+    });
 
     res.json({ ok: true, results });
   } catch (error) {
@@ -502,15 +515,24 @@ function fromBase64Url(str) {
 function loadOrCreateVapidKeys() {
   if (process.env.AHA_VAPID_PUBLIC_KEY && process.env.AHA_VAPID_PRIVATE_KEY) {
     const publicKey = process.env.AHA_VAPID_PUBLIC_KEY.trim();
-    const privatePem = process.env.AHA_VAPID_PRIVATE_KEY.trim();
-    return { publicKey, privatePem, subject: VAPID_SUBJECT };
+    const privateRaw = process.env.AHA_VAPID_PRIVATE_KEY.trim();
+    const privatePem = privateRaw.includes("BEGIN") ? privateRaw : null;
+    const privateKey = privatePem
+      ? extractPrivateKeyBase64Url(privatePem)
+      : privateRaw.replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+    return { publicKey, privatePem: privatePem || "", privateKey, subject: VAPID_SUBJECT };
   }
 
   if (fs.existsSync(VAPID_FILE)) {
     try {
       const saved = JSON.parse(fs.readFileSync(VAPID_FILE, "utf8"));
       if (saved?.publicKey && saved?.privatePem) {
-        return { publicKey: saved.publicKey, privatePem: saved.privatePem, subject: saved.subject || VAPID_SUBJECT };
+        return {
+          publicKey: saved.publicKey,
+          privatePem: saved.privatePem,
+          privateKey: saved.privateKey || extractPrivateKeyBase64Url(saved.privatePem),
+          subject: saved.subject || VAPID_SUBJECT,
+        };
       }
     } catch (error) {
       console.warn("[AHA] Không đọc được vapid.json, sẽ tạo khoá mới.");
@@ -522,19 +544,33 @@ function loadOrCreateVapidKeys() {
   const rawPublic = Buffer.concat([Buffer.from([0x04]), fromBase64Url(publicJwk.x), fromBase64Url(publicJwk.y)]);
   const publicKeyBase64Url = toBase64Url(rawPublic);
   const privatePem = privateKey.export({ format: "pem", type: "pkcs8" });
+  const privateKeyBase64Url = extractPrivateKeyBase64Url(privatePem);
 
   fs.mkdirSync(path.dirname(VAPID_FILE), { recursive: true });
   fs.writeFileSync(
     VAPID_FILE,
-    JSON.stringify({ publicKey: publicKeyBase64Url, privatePem, subject: VAPID_SUBJECT }, null, 2),
+    JSON.stringify(
+      { publicKey: publicKeyBase64Url, privatePem, privateKey: privateKeyBase64Url, subject: VAPID_SUBJECT },
+      null,
+      2,
+    ),
     "utf8",
   );
 
   console.log("[AHA] Đã tạo VAPID keypair mới và lưu vào data/vapid.json");
-  return { publicKey: publicKeyBase64Url, privatePem, subject: VAPID_SUBJECT };
+  return { publicKey: publicKeyBase64Url, privatePem, privateKey: privateKeyBase64Url, subject: VAPID_SUBJECT };
 }
 
 const vapidKeys = loadOrCreateVapidKeys();
+if (webPush) {
+  webPush.setVapidDetails(vapidKeys.subject, vapidKeys.publicKey, vapidKeys.privateKey);
+}
+
+function extractPrivateKeyBase64Url(privatePem) {
+  const jwk = crypto.createPrivateKey(privatePem).export({ format: "jwk" });
+  const d = jwk?.d || "";
+  return d.replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+}
 
 function signVapidToken(audience) {
   const exp = Math.floor(Date.now() / 1000) + 12 * 60 * 60; // 12h
@@ -549,24 +585,27 @@ function signVapidToken(audience) {
 }
 
 async function sendPushPing(subscription) {
-  const endpoint = subscription?.endpoint;
-  if (!endpoint) {
-    return { ok: false, status: 400, message: "Missing endpoint" };
+  if (!webPush) {
+    return { ok: false, status: 500, message: "web-push package chưa được cài." };
   }
 
-  const url = new URL(endpoint);
-  const audience = `${url.protocol}//${url.host}`;
-  const vapidToken = signVapidToken(audience);
+  try {
+    const response = await webPush.sendNotification(
+      subscription,
+      JSON.stringify({
+        title: "AHA",
+        body: "Thông báo thử từ AHA.",
+        url: "/",
+        icon: "/icons/icon-192.png",
+      }),
+      { TTL: 3600 },
+    );
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      TTL: "2419200",
-      Authorization: `WebPush ${vapidToken}`,
-    },
-  });
-
-  return { ok: response.ok, status: response.status, message: await response.text() };
+    return { ok: true, status: response.statusCode || response.status, message: "sent" };
+  } catch (error) {
+    const status = error?.statusCode || error?.status || 500;
+    return { ok: false, status, message: error?.body || error?.message || "send failed" };
+  }
 }
 
 process.on("SIGTERM", () => {
