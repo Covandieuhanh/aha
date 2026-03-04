@@ -18,7 +18,11 @@ const FINANCE_LOG_DOMAIN = "finance";
 const MAX_SYSTEM_AUDIT_LOGS = 20000;
 const ADJUSTMENT_NOTE_PREFIX = "[ĐIỀU CHỈNH]";
 const MAX_FINANCE_RECEIPT_DATA_URL_LENGTH = 4 * 1024 * 1024;
-const FINANCE_EXPENSE_CATEGORIES = new Set(["ADS", "OPERATIONS", "OTHER"]);
+const DEFAULT_FINANCE_EXPENSE_CATEGORIES = [
+  { code: "ADS", name: "Ads" },
+  { code: "OPERATIONS", name: "Vận hành" },
+  { code: "OTHER", name: "Khác" },
+];
 const FINANCE_TYPE_IN = "NHAP";
 const FINANCE_TYPE_OUT = "XUAT";
 let lastFinanceIntegrityAlertKey = "";
@@ -177,11 +181,133 @@ function normalizeAdjustmentNote(note) {
 function normalizeFinanceExpenseCategory(value) {
   const normalized = String(value || "")
     .trim()
-    .toUpperCase();
-  if (normalized === "ADS") return "ADS";
-  if (normalized === "OPERATIONS") return "OPERATIONS";
-  if (normalized === "OTHER") return "OTHER";
-  return "";
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+  return normalized;
+}
+
+function findFinanceCategory(categories, code) {
+  const normalizedCode = normalizeFinanceExpenseCategory(code);
+  if (!normalizedCode) return null;
+  const rows = Array.isArray(categories) ? categories : [];
+  return rows.find((item) => item.code === normalizedCode) || null;
+}
+
+function resolveFinanceExpenseCategoryCode(value, categories, options = {}) {
+  const normalizedCode = normalizeFinanceExpenseCategory(value);
+  if (!normalizedCode) return "";
+  const category = findFinanceCategory(categories, normalizedCode);
+  if (!category) return "";
+  if (options.allowInactive) return normalizedCode;
+  return category.active ? normalizedCode : "";
+}
+
+function buildFinanceCategoryCodeFromName(name, existingCodes = new Set()) {
+  const baseCode = normalizeFinanceExpenseCategory(name) || "CATEGORY";
+  let candidate = baseCode;
+  let index = 1;
+  while (existingCodes.has(candidate)) {
+    candidate = `${baseCode}_${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
+function getFinanceDefaultCategoryName(code) {
+  const normalizedCode = normalizeFinanceExpenseCategory(code);
+  if (!normalizedCode) return "Danh mục";
+  const matchedDefault = DEFAULT_FINANCE_EXPENSE_CATEGORIES.find((item) => item.code === normalizedCode);
+  return matchedDefault?.name || normalizedCode;
+}
+
+function normalizeFinanceExpenseCategories(rawCategories, options = {}) {
+  const source = Array.isArray(rawCategories) ? rawCategories : [];
+  const nowIso = options.now || new Date().toISOString();
+  const normalized = [];
+  const seenCodes = new Set();
+
+  source.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const code = normalizeFinanceExpenseCategory(item.code || item.id || item.value || item.key || item.name || "");
+    if (!code || seenCodes.has(code)) return;
+
+    const name = normalizeTextValue(item.name || item.label || item.displayName || getFinanceDefaultCategoryName(code));
+    normalized.push({
+      code,
+      name: name || getFinanceDefaultCategoryName(code),
+      active: item.active !== false,
+      createdBy: typeof item.createdBy === "string" ? item.createdBy : typeof item.created_by === "string" ? item.created_by : "",
+      created_by:
+        typeof item.createdBy === "string"
+          ? item.createdBy
+          : typeof item.created_by === "string"
+            ? item.created_by
+            : "",
+      createdAt: typeof item.createdAt === "string" ? item.createdAt : nowIso,
+      timestamp: typeof item.createdAt === "string" ? item.createdAt : nowIso,
+      updatedBy: typeof item.updatedBy === "string" ? item.updatedBy : "",
+      updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : "",
+      deletedBy: typeof item.deletedBy === "string" ? item.deletedBy : "",
+      deletedAt: typeof item.deletedAt === "string" ? item.deletedAt : "",
+    });
+    seenCodes.add(code);
+  });
+
+  DEFAULT_FINANCE_EXPENSE_CATEGORIES.forEach((item) => {
+    if (seenCodes.has(item.code)) return;
+    normalized.push({
+      code: item.code,
+      name: item.name,
+      active: true,
+      createdBy: "system",
+      created_by: "system",
+      createdAt: nowIso,
+      timestamp: nowIso,
+      updatedBy: "",
+      updatedAt: "",
+      deletedBy: "",
+      deletedAt: "",
+    });
+    seenCodes.add(item.code);
+  });
+
+  return normalized.sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    return String(a.name || "").localeCompare(String(b.name || ""), "vi");
+  });
+}
+
+function ensureFinanceCategoryCodes(state, codes, options = {}) {
+  const nowIso = options.now || new Date().toISOString();
+  const actorId = typeof options.actorId === "string" ? options.actorId : "";
+  const seen = new Set((Array.isArray(state.financeExpenseCategories) ? state.financeExpenseCategories : []).map((item) => item.code));
+
+  let hasChanges = false;
+  (Array.isArray(codes) ? codes : []).forEach((codeCandidate) => {
+    const code = normalizeFinanceExpenseCategory(codeCandidate);
+    if (!code || seen.has(code)) return;
+    state.financeExpenseCategories.push({
+      code,
+      name: getFinanceDefaultCategoryName(code),
+      active: true,
+      createdBy: actorId,
+      created_by: actorId,
+      createdAt: nowIso,
+      timestamp: nowIso,
+      updatedBy: "",
+      updatedAt: "",
+      deletedBy: "",
+      deletedAt: "",
+    });
+    seen.add(code);
+    hasChanges = true;
+  });
+
+  if (hasChanges) {
+    state.financeExpenseCategories = normalizeFinanceExpenseCategories(state.financeExpenseCategories, { now: nowIso });
+  }
 }
 
 function normalizeFinanceTransactionType(value) {
@@ -533,7 +659,11 @@ function normalizeAllRecords(state) {
         .slice(0, MAX_SYSTEM_AUDIT_LOGS)
     : [];
 
+  state.financeExpenseCategories = normalizeFinanceExpenseCategories(state.financeExpenseCategories);
+  const knownCategoryCodes = new Set(state.financeExpenseCategories.map((item) => item.code));
+
   let shouldResetFinanceIntegrity = false;
+  const missingCategoryCodes = new Set();
   state.financeTransactions = Array.isArray(state.financeTransactions)
     ? state.financeTransactions
         .filter((item) => item && typeof item === "object")
@@ -548,6 +678,9 @@ function normalizeAllRecords(state) {
           const rawNote = typeof item.note === "string" ? item.note : "";
           const rawCategory = normalizeFinanceExpenseCategory(item.category);
           const category = type === FINANCE_TYPE_OUT ? rawCategory : "";
+          if (category && !knownCategoryCodes.has(category)) {
+            missingCategoryCodes.add(category);
+          }
           const rawReceiptImageDataUrl =
             typeof item.receiptImageDataUrl === "string"
               ? item.receiptImageDataUrl
@@ -642,6 +775,67 @@ function normalizeAllRecords(state) {
         })
         .filter((item) => item.userId && item.type && item.amount > 0)
     : [];
+
+  if (missingCategoryCodes.size > 0) {
+    ensureFinanceCategoryCodes(state, Array.from(missingCategoryCodes), { actorId: "system" });
+  }
+
+  const transactionMap = new Map(state.financeTransactions.map((item) => [item.id, item]));
+  const missingCategoryFromReclassCodes = new Set();
+  state.financeCategoryReclassLogs = Array.isArray(state.financeCategoryReclassLogs)
+    ? state.financeCategoryReclassLogs
+        .filter((item) => item && typeof item === "object")
+        .map((item) => {
+          const transactionId = typeof item.transactionId === "string" ? item.transactionId : "";
+          const transaction = transactionMap.get(transactionId);
+          if (!transaction) return null;
+          if (normalizeFinanceTransactionType(transaction.type) !== FINANCE_TYPE_OUT) return null;
+          if (transaction.transferId) return null;
+
+          const fromCategory = normalizeFinanceExpenseCategory(item.fromCategory || item.from_category || transaction.category);
+          const toCategory = normalizeFinanceExpenseCategory(item.toCategory || item.to_category);
+          if (!fromCategory || !toCategory || fromCategory === toCategory) return null;
+
+          if (!knownCategoryCodes.has(fromCategory)) {
+            missingCategoryFromReclassCodes.add(fromCategory);
+          }
+          if (!knownCategoryCodes.has(toCategory)) {
+            missingCategoryFromReclassCodes.add(toCategory);
+          }
+
+          const reason = normalizeTextValue(item.reason || item.note || "");
+          const createdBy =
+            typeof item.createdBy === "string"
+              ? item.createdBy
+              : typeof item.created_by === "string"
+                ? item.created_by
+                : "";
+          const createdAt =
+            typeof item.createdAt === "string"
+              ? item.createdAt
+              : typeof item.timestamp === "string"
+                ? item.timestamp
+                : new Date().toISOString();
+
+          return {
+            id: typeof item.id === "string" && item.id ? item.id : createId("frc"),
+            transactionId,
+            fromCategory,
+            toCategory,
+            reason,
+            createdBy,
+            created_by: createdBy,
+            createdAt,
+            timestamp: createdAt,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+    : [];
+
+  if (missingCategoryFromReclassCodes.size > 0) {
+    ensureFinanceCategoryCodes(state, Array.from(missingCategoryFromReclassCodes), { actorId: "system" });
+  }
 
   if (shouldResetFinanceIntegrity && state.financeTransactions.length > 0) {
     state.financeTransactions = state.financeTransactions.map((item) => ({
@@ -753,6 +947,8 @@ function createInitialState() {
     visits: [],
     referrals: [],
     financeTransactions: [],
+    financeExpenseCategories: [],
+    financeCategoryReclassLogs: [],
     systemAuditLogs: [],
     users: [],
     pushSubscriptions: [],
@@ -777,6 +973,8 @@ function readStateFromDisk() {
       visits: Array.isArray(parsed.visits) ? parsed.visits : [],
       referrals: Array.isArray(parsed.referrals) ? parsed.referrals : [],
       financeTransactions: Array.isArray(parsed.financeTransactions) ? parsed.financeTransactions : [],
+      financeExpenseCategories: Array.isArray(parsed.financeExpenseCategories) ? parsed.financeExpenseCategories : [],
+      financeCategoryReclassLogs: Array.isArray(parsed.financeCategoryReclassLogs) ? parsed.financeCategoryReclassLogs : [],
       systemAuditLogs: Array.isArray(parsed.systemAuditLogs)
         ? parsed.systemAuditLogs
         : Array.isArray(parsed.auditLogs)
@@ -1011,6 +1209,52 @@ function getFinanceTransactionsForClient(requestUser) {
   return validTransactions.filter((item) => item.userId === requestUser.id);
 }
 
+function getFinanceExpenseCategoriesForClient(requestUser) {
+  if (!hasFeaturePermission(requestUser, "finance")) {
+    return [];
+  }
+
+  return state.financeExpenseCategories;
+}
+
+function getFinanceCategoryReclassLogsForClient(requestUser) {
+  if (!hasFeaturePermission(requestUser, "finance")) {
+    return [];
+  }
+
+  if (requestUser.role === "admin") {
+    return state.financeCategoryReclassLogs;
+  }
+
+  const allowedTransactionIds = new Set(
+    getFinanceTransactionsForClient(requestUser)
+      .filter((item) => item.userId === requestUser.id)
+      .map((item) => item.id),
+  );
+
+  return state.financeCategoryReclassLogs.filter((item) => allowedTransactionIds.has(item.transactionId));
+}
+
+function getLatestFinanceCategoryReclassMap() {
+  const map = new Map();
+  state.financeCategoryReclassLogs.forEach((item) => {
+    if (!item?.transactionId) return;
+    if (map.has(item.transactionId)) return;
+    map.set(item.transactionId, item);
+  });
+  return map;
+}
+
+function getFinanceTransactionEffectiveCategoryCode(transaction, latestReclassMap = getLatestFinanceCategoryReclassMap()) {
+  if (!transaction) return "";
+  if (normalizeFinanceTransactionType(transaction.type) !== FINANCE_TYPE_OUT) return "";
+  if (transaction.transferId) return "";
+  const baseCategory = normalizeFinanceExpenseCategory(transaction.category);
+  const reclass = latestReclassMap.get(transaction.id);
+  if (!reclass) return baseCategory;
+  return normalizeFinanceExpenseCategory(reclass.toCategory) || baseCategory;
+}
+
 function getFinanceBalanceForUser(userId) {
   if (!userId) return 0;
   return getValidFinanceTransactions().reduce((sum, item) => {
@@ -1060,6 +1304,8 @@ function getBootstrapForUser(requestUser) {
         : [],
     referrals: clone(getReferralsForClient(requestUser)),
     financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
+    financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+    financeCategoryReclassLogs: clone(getFinanceCategoryReclassLogsForClient(requestUser)),
     users: clone(getUsersForClient(requestUser)),
     financeIntegrity:
       requestUser.role === "admin"
@@ -1556,7 +1802,9 @@ function addFinanceTransaction(requestUser, input) {
   const type = normalizeFinanceTransactionType(input?.type);
   const amount = Number(input?.amount || 0);
   const transactionDate = typeof input?.transactionDate === "string" ? input.transactionDate.trim() : "";
-  const category = normalizeFinanceExpenseCategory(input?.category);
+  const category = resolveFinanceExpenseCategoryCode(input?.category, state.financeExpenseCategories, {
+    allowInactive: false,
+  });
   const rawNote = typeof input?.note === "string" ? input.note : "";
   const requestedUserId = typeof input?.userId === "string" ? input.userId : "";
   const requestedAdjustmentOf = typeof input?.adjustmentOf === "string" ? input.adjustmentOf.trim() : "";
@@ -1629,8 +1877,8 @@ function addFinanceTransaction(requestUser, input) {
       }
       transferTargetUserId = targetUser.id;
     } else {
-      if (!FINANCE_EXPENSE_CATEGORIES.has(category)) {
-        throw httpError(400, "Danh mục xuất không hợp lệ. Chỉ chấp nhận Ads, Vận hành hoặc Khác.");
+      if (!category) {
+        throw httpError(400, "Danh mục xuất không hợp lệ hoặc đã ngừng sử dụng.");
       }
       if (requestedUserId && requestedUserId !== requestUser.id) {
         throw httpError(403, "Bạn chỉ được ghi nhận giao dịch cho ví của chính mình.");
@@ -1793,6 +2041,247 @@ function addFinanceTransaction(requestUser, input) {
     transaction: clone(resultTransaction),
     targetBalance: resultTransaction ? getFinanceBalanceForUser(resultTransaction.userId) : 0,
     financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
+    financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+    financeCategoryReclassLogs: clone(getFinanceCategoryReclassLogsForClient(requestUser)),
+  };
+}
+
+function createFinanceExpenseCategory(requestUser, input) {
+  assertFeaturePermission(requestUser, "finance");
+  if (requestUser.role !== "admin") {
+    throw httpError(403, "Chỉ quản trị viên được quản lý danh mục xuất.");
+  }
+
+  const name = normalizeTextValue(input?.name);
+  if (!name) {
+    throw httpError(400, "Vui lòng nhập tên danh mục.");
+  }
+  if (name.length > 80) {
+    throw httpError(400, "Tên danh mục tối đa 80 ký tự.");
+  }
+
+  const existingCodes = new Set(state.financeExpenseCategories.map((item) => item.code));
+  const code = buildFinanceCategoryCodeFromName(name, existingCodes);
+  const nowIso = new Date().toISOString();
+  const category = {
+    code,
+    name,
+    active: true,
+    createdBy: requestUser.id,
+    created_by: requestUser.id,
+    createdAt: nowIso,
+    timestamp: nowIso,
+    updatedBy: "",
+    updatedAt: "",
+    deletedBy: "",
+    deletedAt: "",
+  };
+
+  state.financeExpenseCategories.push(category);
+  state.financeExpenseCategories = normalizeFinanceExpenseCategories(state.financeExpenseCategories);
+  appendSystemAuditLog({
+    domain: FINANCE_LOG_DOMAIN,
+    action: "FINANCE_CATEGORY_CREATED",
+    actorId: requestUser.id,
+    createdAt: nowIso,
+    details: {
+      categoryCode: code,
+      categoryName: name,
+    },
+  });
+  persist();
+
+  return {
+    category: clone(category),
+    financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+  };
+}
+
+function updateFinanceExpenseCategory(requestUser, categoryCode, input) {
+  assertFeaturePermission(requestUser, "finance");
+  if (requestUser.role !== "admin") {
+    throw httpError(403, "Chỉ quản trị viên được quản lý danh mục xuất.");
+  }
+
+  const normalizedCode = normalizeFinanceExpenseCategory(categoryCode);
+  if (!normalizedCode) {
+    throw httpError(400, "Mã danh mục không hợp lệ.");
+  }
+
+  const category = findFinanceCategory(state.financeExpenseCategories, normalizedCode);
+  if (!category) {
+    throw httpError(404, "Không tìm thấy danh mục cần cập nhật.");
+  }
+
+  const nextNameRaw = typeof input?.name === "string" ? input.name : category.name;
+  const nextName = normalizeTextValue(nextNameRaw);
+  if (!nextName) {
+    throw httpError(400, "Vui lòng nhập tên danh mục.");
+  }
+  if (nextName.length > 80) {
+    throw httpError(400, "Tên danh mục tối đa 80 ký tự.");
+  }
+
+  const nextActive = typeof input?.active === "boolean" ? input.active : category.active;
+  const nowIso = new Date().toISOString();
+  category.name = nextName;
+  category.active = Boolean(nextActive);
+  category.updatedBy = requestUser.id;
+  category.updatedAt = nowIso;
+  if (category.active) {
+    category.deletedBy = "";
+    category.deletedAt = "";
+  } else {
+    category.deletedBy = requestUser.id;
+    category.deletedAt = nowIso;
+  }
+
+  state.financeExpenseCategories = normalizeFinanceExpenseCategories(state.financeExpenseCategories);
+  appendSystemAuditLog({
+    domain: FINANCE_LOG_DOMAIN,
+    action: "FINANCE_CATEGORY_UPDATED",
+    actorId: requestUser.id,
+    createdAt: nowIso,
+    details: {
+      categoryCode: category.code,
+      categoryName: category.name,
+      active: category.active,
+    },
+  });
+  persist();
+
+  return {
+    category: clone(findFinanceCategory(state.financeExpenseCategories, normalizedCode)),
+    financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+  };
+}
+
+function deleteFinanceExpenseCategory(requestUser, categoryCode) {
+  assertFeaturePermission(requestUser, "finance");
+  if (requestUser.role !== "admin") {
+    throw httpError(403, "Chỉ quản trị viên được quản lý danh mục xuất.");
+  }
+
+  const normalizedCode = normalizeFinanceExpenseCategory(categoryCode);
+  if (!normalizedCode) {
+    throw httpError(400, "Mã danh mục không hợp lệ.");
+  }
+
+  const category = findFinanceCategory(state.financeExpenseCategories, normalizedCode);
+  if (!category) {
+    throw httpError(404, "Không tìm thấy danh mục cần xoá.");
+  }
+
+  if (!category.active) {
+    return {
+      category: clone(category),
+      financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+    };
+  }
+
+  const nowIso = new Date().toISOString();
+  category.active = false;
+  category.updatedBy = requestUser.id;
+  category.updatedAt = nowIso;
+  category.deletedBy = requestUser.id;
+  category.deletedAt = nowIso;
+
+  state.financeExpenseCategories = normalizeFinanceExpenseCategories(state.financeExpenseCategories);
+  appendSystemAuditLog({
+    domain: FINANCE_LOG_DOMAIN,
+    action: "FINANCE_CATEGORY_DELETED",
+    actorId: requestUser.id,
+    createdAt: nowIso,
+    details: {
+      categoryCode: category.code,
+      categoryName: category.name,
+    },
+  });
+  persist();
+
+  return {
+    category: clone(findFinanceCategory(state.financeExpenseCategories, normalizedCode)),
+    financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+  };
+}
+
+function reclassifyFinanceTransactionCategory(requestUser, transactionId, input) {
+  assertFeaturePermission(requestUser, "finance");
+  if (requestUser.role !== "admin") {
+    throw httpError(403, "Chỉ quản trị viên được chỉnh danh mục giao dịch.");
+  }
+
+  const targetTransactionId = typeof transactionId === "string" ? transactionId.trim() : "";
+  if (!targetTransactionId) {
+    throw httpError(400, "Thiếu mã giao dịch cần chỉnh danh mục.");
+  }
+
+  const transaction = state.financeTransactions.find((item) => item.id === targetTransactionId && item.integrityValid !== false);
+  if (!transaction) {
+    throw httpError(404, "Không tìm thấy giao dịch hợp lệ để chỉnh danh mục.");
+  }
+  if (normalizeFinanceTransactionType(transaction.type) !== FINANCE_TYPE_OUT || transaction.transferId) {
+    throw httpError(400, "Chỉ cho phép chỉnh danh mục với giao dịch XUẤT chi tiêu.");
+  }
+
+  const toCategory = resolveFinanceExpenseCategoryCode(input?.toCategory, state.financeExpenseCategories, {
+    allowInactive: false,
+  });
+  if (!toCategory) {
+    throw httpError(400, "Danh mục mới không hợp lệ hoặc đã ngừng sử dụng.");
+  }
+
+  const latestReclassMap = getLatestFinanceCategoryReclassMap();
+  const fromCategory = getFinanceTransactionEffectiveCategoryCode(transaction, latestReclassMap);
+  if (!fromCategory) {
+    throw httpError(400, "Giao dịch chưa có danh mục để điều chỉnh.");
+  }
+  if (fromCategory === toCategory) {
+    throw httpError(400, "Danh mục mới phải khác danh mục hiện tại.");
+  }
+
+  const reason = normalizeTextValue(input?.reason);
+  if (!reason) {
+    throw httpError(400, "Vui lòng nhập lý do điều chỉnh danh mục.");
+  }
+  if (reason.length > 500) {
+    throw httpError(400, "Lý do điều chỉnh tối đa 500 ký tự.");
+  }
+
+  const nowIso = new Date().toISOString();
+  const reclassLog = {
+    id: createId("frc"),
+    transactionId: transaction.id,
+    fromCategory,
+    toCategory,
+    reason,
+    createdBy: requestUser.id,
+    created_by: requestUser.id,
+    createdAt: nowIso,
+    timestamp: nowIso,
+  };
+
+  state.financeCategoryReclassLogs.unshift(reclassLog);
+  appendSystemAuditLog({
+    domain: FINANCE_LOG_DOMAIN,
+    action: "FINANCE_CATEGORY_RECLASSIFIED",
+    actorId: requestUser.id,
+    walletUserId: transaction.userId,
+    transactionId: transaction.id,
+    createdAt: nowIso,
+    details: {
+      fromCategory,
+      toCategory,
+      reason,
+    },
+  });
+  persist();
+
+  return {
+    reclassLog: clone(reclassLog),
+    financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
+    financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+    financeCategoryReclassLogs: clone(getFinanceCategoryReclassLogsForClient(requestUser)),
   };
 }
 
@@ -2058,6 +2547,10 @@ module.exports = {
   updateReferral,
   deleteReferral,
   addFinanceTransaction,
+  createFinanceExpenseCategory,
+  updateFinanceExpenseCategory,
+  deleteFinanceExpenseCategory,
+  reclassifyFinanceTransactionCategory,
   purgeDataByDateRange,
   addVisit,
   updateVisit,
@@ -2071,6 +2564,7 @@ module.exports = {
   resetMemberPassword,
   getBootstrapForUser,
   getFinanceAuditLogsForClient,
+  getFinanceExpenseCategoriesForClient,
   getFinanceIntegrityStatus,
   hasFeaturePermission,
   httpError,

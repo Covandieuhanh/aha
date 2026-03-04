@@ -581,6 +581,54 @@
                   <tbody id="finance-report-table-body"></tbody>
                 </table>
               </div>
+              <h3>Thống kê xuất theo danh mục</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Danh mục</th>
+                      <th>Tổng xuất</th>
+                      <th>Số giao dịch</th>
+                      <th>Tỷ trọng</th>
+                    </tr>
+                  </thead>
+                  <tbody id="finance-report-category-body"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article id="finance-category-admin-panel" class="card hidden">
+              <h2>Quản lý danh mục xuất</h2>
+              <p class="card-desc">
+                Quản trị viên có thể thêm/sửa/xoá (ngừng sử dụng) danh mục xuất. Lịch sử giao dịch cũ vẫn giữ nguyên, chỉ điều chỉnh
+                phân loại báo cáo.
+              </p>
+              <form id="finance-category-form" class="form-grid">
+                <input type="hidden" id="finance-category-code" />
+                <label>
+                  Tên danh mục
+                  <input type="text" id="finance-category-name" placeholder="Ví dụ: Marketing tổng hợp" required />
+                </label>
+                <div class="form-actions">
+                  <button type="submit" id="finance-category-save-btn" class="primary-btn">Lưu danh mục</button>
+                  <button type="button" id="finance-category-cancel-btn" class="secondary-btn hidden">Huỷ sửa</button>
+                </div>
+              </form>
+              <div id="finance-category-result" class="result-box"></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Mã</th>
+                      <th>Tên danh mục</th>
+                      <th>Trạng thái</th>
+                      <th>Sử dụng</th>
+                      <th>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody id="finance-category-table-body"></tbody>
+                </table>
+              </div>
             </article>
 
             <article class="card">
@@ -598,6 +646,23 @@
               </div>
               <div class="form-actions">
                 <button type="button" id="finance-export-csv-btn" class="secondary-btn">Xuất CSV danh sách hiện tại</button>
+              </div>
+              <div id="finance-reclass-panel" class="form-grid hidden">
+                <h3>Điều chỉnh danh mục khoản xuất</h3>
+                <p id="finance-reclass-target" class="card-desc">Chọn một giao dịch xuất trong bảng để điều chỉnh danh mục.</p>
+                <label>
+                  Danh mục mới
+                  <select id="finance-reclass-category"></select>
+                </label>
+                <label>
+                  Lý do điều chỉnh
+                  <input type="text" id="finance-reclass-reason" placeholder="Bắt buộc: nêu rõ lý do" />
+                </label>
+                <div class="form-actions">
+                  <button type="button" id="finance-reclass-submit-btn" class="primary-btn">Lưu điều chỉnh danh mục</button>
+                  <button type="button" id="finance-reclass-cancel-btn" class="secondary-btn">Huỷ</button>
+                </div>
+                <div id="finance-reclass-result" class="result-box"></div>
               </div>
               <div class="table-wrap">
                 <table>

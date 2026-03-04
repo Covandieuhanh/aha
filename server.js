@@ -17,7 +17,12 @@ const {
   deleteProduct,
   addReferral,
   addFinanceTransaction,
+  createFinanceExpenseCategory,
+  updateFinanceExpenseCategory,
+  deleteFinanceExpenseCategory,
+  reclassifyFinanceTransactionCategory,
   getFinanceAuditLogsForClient,
+  getFinanceExpenseCategoriesForClient,
   getFinanceIntegrityStatus,
   updateReferral,
   deleteReferral,
@@ -365,6 +370,51 @@ app.post("/api/finance/transactions", requireAuth, (req, res) => {
     res.status(201).json(payload);
   } catch (error) {
     sendApiError(res, error, "Không thể ghi nhận giao dịch tài chính.");
+  }
+});
+
+app.get("/api/finance/categories", requireAuth, (req, res) => {
+  try {
+    const categories = getFinanceExpenseCategoriesForClient(req.user);
+    res.json({ financeExpenseCategories: categories });
+  } catch (error) {
+    sendApiError(res, error, "Không thể đọc danh mục xuất.");
+  }
+});
+
+app.post("/api/finance/categories", requireAuth, (req, res) => {
+  try {
+    const payload = createFinanceExpenseCategory(req.user, req.body);
+    res.status(201).json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể tạo danh mục xuất.");
+  }
+});
+
+app.patch("/api/finance/categories/:code", requireAuth, (req, res) => {
+  try {
+    const payload = updateFinanceExpenseCategory(req.user, req.params.code, req.body);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể cập nhật danh mục xuất.");
+  }
+});
+
+app.delete("/api/finance/categories/:code", requireAuth, (req, res) => {
+  try {
+    const payload = deleteFinanceExpenseCategory(req.user, req.params.code);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể xoá danh mục xuất.");
+  }
+});
+
+app.post("/api/finance/transactions/:id/reclass-category", requireAuth, (req, res) => {
+  try {
+    const payload = reclassifyFinanceTransactionCategory(req.user, req.params.id, req.body);
+    res.status(201).json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể điều chỉnh danh mục giao dịch.");
   }
 });
 

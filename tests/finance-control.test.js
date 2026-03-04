@@ -10,6 +10,8 @@ const {
   login,
   logout,
   openTab,
+  setValue,
+  submit,
   textOf,
   updateMemberPermissions,
 } = require('./helpers/appHarness');
@@ -440,6 +442,126 @@ describe('Tài chính', () => {
     expect(textOf(byId(ctx, 'finance-history-title'))).toContain('0900000101');
     expect(textOf(byId(ctx, 'finance-table-body'))).toContain('Cap quy A');
     expect(textOf(byId(ctx, 'finance-table-body'))).not.toContain('Cap quy B');
+  });
+
+  it('allows admin to reclassify expense category without changing money totals', () => {
+    ctx = bootApp();
+
+    login(ctx, 'admin', 'admin123');
+    createMember(ctx, {
+      fullName: 'Nhân viên D',
+      username: '0900000104',
+      password: '123456',
+    });
+
+    updateMemberPermissions(ctx, '0900000104', {
+      customers: false,
+      customerEdit: false,
+      products: false,
+      productsEdit: false,
+      productsDelete: false,
+      visits: false,
+      visitsEdit: false,
+      visitsDelete: false,
+      referrals: false,
+      referralsEdit: false,
+      referralsDelete: false,
+      finance: true,
+      dataCleanup: false,
+      backupData: false,
+      changePassword: false,
+      reports: true,
+      reportsAll: false,
+    });
+
+    addFinanceTransaction(ctx, {
+      type: 'NHAP',
+      amount: 500000,
+      note: 'Admin nap quy de test reclass',
+    });
+    addFinanceTransaction(ctx, {
+      type: 'XUAT',
+      targetUsername: '0900000104',
+      amount: 500000,
+      note: 'Cap quy cho nhan vien D',
+    });
+
+    logout(ctx);
+    login(ctx, '0900000104', '123456');
+    const memberSpendMessage = addFinanceTransaction(ctx, {
+      type: 'XUAT',
+      amount: 120000,
+      note: 'Chi ads ban dau',
+    });
+    expect(memberSpendMessage).toContain('Đã ghi nhận XUẤT');
+
+    logout(ctx);
+    login(ctx, 'admin', 'admin123');
+    openTab(ctx, 'finance');
+
+    const staffRows = [...byId(ctx, 'finance-staff-body').querySelectorAll('tr')].filter(
+      (row) => !row.querySelector('.empty-cell'),
+    );
+    const memberRow = staffRows.find((row) => row.textContent.includes('0900000104'));
+    expect(memberRow).toBeTruthy();
+    click(memberRow);
+
+    const beforeSummaryText = textOf(byId(ctx, 'finance-summary'));
+    const beforeRowCount = getDataRows(ctx, 'finance-table-body').length;
+    const beforeHistoryText = textOf(byId(ctx, 'finance-table-body'));
+    expect(beforeHistoryText).toContain('Chi ads ban dau');
+    expect(beforeHistoryText).toContain('Ads');
+
+    const expenseRow = getDataRows(ctx, 'finance-table-body').find((row) => row.textContent.includes('Chi ads ban dau'));
+    expect(expenseRow).toBeTruthy();
+    const reclassButton = expenseRow.querySelector('.finance-reclass-open-btn');
+    expect(reclassButton).toBeTruthy();
+    click(reclassButton);
+
+    setValue(byId(ctx, 'finance-reclass-category'), 'OPERATIONS');
+    setValue(byId(ctx, 'finance-reclass-reason'), 'Phan loai lai chi phi');
+    click(byId(ctx, 'finance-reclass-submit-btn'));
+
+    const afterSummaryText = textOf(byId(ctx, 'finance-summary'));
+    const afterRowCount = getDataRows(ctx, 'finance-table-body').length;
+    const afterHistoryText = textOf(byId(ctx, 'finance-table-body'));
+
+    expect(afterSummaryText).toBe(beforeSummaryText);
+    expect(afterRowCount).toBe(beforeRowCount);
+    expect(afterHistoryText).toContain('Chi ads ban dau');
+    expect(afterHistoryText).toContain('Vận hành');
+    expect(textOf(byId(ctx, 'finance-report-category-body'))).toContain('Vận hành');
+    expect(textOf(byId(ctx, 'finance-report-category-body'))).toContain('120.000');
+  });
+
+  it('allows admin to add, edit and deactivate expense categories', () => {
+    ctx = bootApp();
+
+    login(ctx, 'admin', 'admin123');
+    openTab(ctx, 'finance');
+
+    setValue(byId(ctx, 'finance-category-name'), 'Marketing');
+    submit(byId(ctx, 'finance-category-form'));
+    expect(textOf(byId(ctx, 'finance-category-table-body'))).toContain('MARKETING');
+    expect(textOf(byId(ctx, 'finance-category-table-body'))).toContain('Marketing');
+
+    let marketingRow = getDataRows(ctx, 'finance-category-table-body').find((row) => row.textContent.includes('MARKETING'));
+    expect(marketingRow).toBeTruthy();
+    click(marketingRow.querySelector('.finance-category-edit-btn'));
+    setValue(byId(ctx, 'finance-category-name'), 'Marketing tổng');
+    submit(byId(ctx, 'finance-category-form'));
+    expect(textOf(byId(ctx, 'finance-category-table-body'))).toContain('Marketing tổng');
+
+    marketingRow = getDataRows(ctx, 'finance-category-table-body').find((row) => row.textContent.includes('MARKETING'));
+    expect(marketingRow).toBeTruthy();
+    click(marketingRow.querySelector('.finance-category-toggle-btn'));
+
+    const categoryTableText = textOf(byId(ctx, 'finance-category-table-body'));
+    expect(categoryTableText).toContain('Marketing tổng');
+    expect(categoryTableText).toContain('Ngừng dùng');
+
+    const categorySelectText = [...byId(ctx, 'finance-category').options].map((item) => item.textContent).join(' ');
+    expect(categorySelectText).not.toContain('Marketing tổng');
   });
 
   it('supports optional transaction date and keeps realtime default when left empty', () => {
