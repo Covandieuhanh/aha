@@ -476,6 +476,8 @@ function addFinanceTransaction(ctx, { type, amount, note = '', targetUsername = 
     click(openBtn);
   }
 
+  setValue(byId(ctx, 'finance-type'), type);
+
   if (targetUsername) {
     selectOptionByLabel(
       byId(ctx, 'finance-user'),
@@ -489,7 +491,6 @@ function addFinanceTransaction(ctx, { type, amount, note = '', targetUsername = 
     }
   }
 
-  setValue(byId(ctx, 'finance-type'), type);
   setValue(byId(ctx, 'finance-amount'), String(amount));
   if (transactionDate) {
     setValue(byId(ctx, 'finance-date'), transactionDate);

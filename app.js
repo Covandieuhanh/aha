@@ -86,6 +86,7 @@ const MEMBER_PERMISSION_KEYS = [
   "referralsEdit",
   "referralsDelete",
   "finance",
+  "financeFund",
   "dataCleanup",
   "backupData",
   "changePassword",
@@ -275,6 +276,7 @@ const refs = {
   permVisitsEdit: document.getElementById("perm-visits-edit"),
   permVisitsDelete: document.getElementById("perm-visits-delete"),
   permFinance: document.getElementById("perm-finance"),
+  permFinanceFund: document.getElementById("perm-finance-fund"),
   permReferrals: document.getElementById("perm-referrals"),
   permReferralsEdit: document.getElementById("perm-referrals-edit"),
   permReferralsDelete: document.getElementById("perm-referrals-delete"),
@@ -419,6 +421,12 @@ function bindEvents() {
     refs.financeUser.addEventListener("input", renderFinance);
     refs.financeUser.addEventListener("change", renderFinance);
   }
+  if (refs.financeType) {
+    refs.financeType.addEventListener("change", () => {
+      refs.financeType.dataset.touched = "true";
+      renderFinance();
+    });
+  }
   if (refs.financeSearchNote) {
     refs.financeSearchNote.addEventListener("input", renderFinance);
   }
@@ -531,6 +539,7 @@ function setDefaultMemberPermissionInputs() {
   refs.permVisitsEdit.checked = false;
   refs.permVisitsDelete.checked = false;
   refs.permFinance.checked = false;
+  refs.permFinanceFund.checked = false;
   refs.permReferrals.checked = false;
   refs.permReferralsEdit.checked = false;
   refs.permReferralsDelete.checked = false;
@@ -732,6 +741,7 @@ function getDefaultMemberPermissions() {
     referralsEdit: false,
     referralsDelete: false,
     finance: false,
+    financeFund: false,
     dataCleanup: false,
     backupData: false,
     changePassword: false,
@@ -757,6 +767,7 @@ function buildMemberPermissions(rawPermissions) {
     referralsEdit: Boolean(source.referralsEdit ?? defaults.referralsEdit),
     referralsDelete: Boolean(source.referralsDelete ?? defaults.referralsDelete),
     finance: Boolean(source.finance ?? defaults.finance),
+    financeFund: Boolean(source.financeFund ?? defaults.financeFund),
     dataCleanup: Boolean(source.dataCleanup ?? defaults.dataCleanup),
     backupData: Boolean(source.backupData ?? defaults.backupData),
     changePassword: Boolean(source.changePassword ?? defaults.changePassword),
@@ -798,6 +809,7 @@ function normalizeUser(user) {
             referralsEdit: true,
             referralsDelete: true,
             finance: true,
+            financeFund: true,
             dataCleanup: true,
             backupData: true,
             changePassword: true,
@@ -834,6 +846,7 @@ function ensureAdminAccount() {
         referralsEdit: true,
         referralsDelete: true,
         finance: true,
+        financeFund: true,
         dataCleanup: true,
         backupData: true,
         changePassword: true,
@@ -861,6 +874,7 @@ function ensureAdminAccount() {
         referralsEdit: true,
         referralsDelete: true,
         finance: true,
+        financeFund: true,
         dataCleanup: true,
         backupData: true,
         changePassword: true,
@@ -1437,6 +1451,12 @@ function canDeleteReferral(user) {
   return hasFeaturePermission(user, "referralsDelete");
 }
 
+function canGrantFinanceToMembers(user) {
+  if (!user) return false;
+  if (isAdmin(user)) return true;
+  return Boolean(user.permissions?.financeFund);
+}
+
 function hasFeaturePermission(user, featureKey) {
   if (!user) return false;
   if (isAdmin(user)) return true;
@@ -1679,11 +1699,54 @@ function getMemberUsers() {
     .sort((a, b) => a.fullName.localeCompare(b.fullName, "vi"));
 }
 
+function getFinanceUserLabel(user) {
+  if (!user) return "";
+  return `${user.fullName} (${user.username})`;
+}
+
+function getFinanceSelectableUsers(currentUser = getCurrentUser()) {
+  const members = getMemberUsers();
+  if (!currentUser || currentUser.role !== "member") return members;
+  if (members.some((item) => item.id === currentUser.id)) return members;
+  return [...members, currentUser].sort((a, b) => a.fullName.localeCompare(b.fullName, "vi"));
+}
+
 function getUserDisplayName(userId) {
   if (!userId) return "-";
   const user = state.users.find((item) => item.id === userId);
   if (!user) return "Không xác định";
   return `${user.fullName} (${user.username})`;
+}
+
+function getFinanceCounterpartyUserId(item) {
+  if (!item) return "";
+  const value =
+    typeof item.transferCounterpartyUserId === "string"
+      ? item.transferCounterpartyUserId
+      : typeof item.transfer_counterparty_user_id === "string"
+        ? item.transfer_counterparty_user_id
+        : "";
+  return value.trim();
+}
+
+function getFinanceRelatedMemberDisplay(item, options = {}) {
+  const counterpartyUserId = getFinanceCounterpartyUserId(item);
+  if (counterpartyUserId) {
+    return getUserDisplayName(counterpartyUserId);
+  }
+
+  const currentUserId = typeof options.currentUserId === "string" ? options.currentUserId : "";
+  const selfLabel = typeof options.selfLabel === "string" ? options.selfLabel : "Tự xuất";
+  if (
+    currentUserId &&
+    item &&
+    item.userId === currentUserId &&
+    normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_OUT
+  ) {
+    return selfLabel;
+  }
+
+  return typeof options.emptyLabel === "string" ? options.emptyLabel : "-";
 }
 
 function normalizeFinanceTransactionType(value) {
@@ -1872,7 +1935,9 @@ function filterFinanceHistoryRows(rows) {
         item.note || "",
         getFinanceExpenseCategoryLabel(item.category),
         getFinanceTypeLabel(item.type),
+        getUserDisplayName(item.userId),
         getUserDisplayName(item.createdBy || item.created_by),
+        getFinanceRelatedMemberDisplay(item, { selfLabel: "Tự xuất", emptyLabel: "" }),
       ]
         .join(" ")
         .trim();
@@ -1886,7 +1951,18 @@ function filterFinanceHistoryRows(rows) {
 }
 
 function buildFinanceVisibleRowsCsv(rows) {
-  const header = ["created_at", "type", "category", "amount", "wallet_user", "created_by", "note", "receipt_name", "has_receipt"];
+  const header = [
+    "created_at",
+    "type",
+    "category",
+    "amount",
+    "wallet_user",
+    "created_by",
+    "related_member",
+    "note",
+    "receipt_name",
+    "has_receipt",
+  ];
   const body = rows.map((item) =>
     [
       item.createdAt || item.timestamp || "",
@@ -1895,6 +1971,7 @@ function buildFinanceVisibleRowsCsv(rows) {
       Number(item.amount || 0),
       getUserDisplayName(item.userId),
       getUserDisplayName(item.createdBy || item.created_by),
+      getFinanceRelatedMemberDisplay(item, { selfLabel: "Tự xuất" }),
       item.note || "",
       item.receiptImageName || "",
       item.receiptImageDataUrl ? "yes" : "no",
@@ -1920,13 +1997,27 @@ function exportFinanceVisibleRowsCsv() {
   refs.financeResult.textContent = `Đã xuất ${state.financeVisibleRows.length} giao dịch ra CSV.`;
 }
 
+function resolveFinanceUserIdByValue(rawValue, users = getFinanceSelectableUsers()) {
+  const typed = String(rawValue || "").trim();
+  if (!typed) return "";
+  const normalizedTyped = normalizeTextValue(typed);
+  const matched = users.find((item) => {
+    const comparableValues = [item.id, item.username, item.fullName, getFinanceUserLabel(item)];
+    return comparableValues.some((value) => normalizeTextValue(value) === normalizedTyped);
+  });
+  return matched ? matched.id : "";
+}
+
 function resolveFinanceUserId() {
-  return resolveIdFromOptions(
+  const users = getFinanceSelectableUsers();
+  const resolvedFromOption = resolveIdFromOptions(
     refs.financeUser,
     refs.financeUserOptions,
-    getMemberUsers(),
-    (item) => `${item.fullName} (${item.username})`,
+    users,
+    (item) => getFinanceUserLabel(item),
   );
+  if (resolvedFromOption) return resolvedFromOption;
+  return resolveFinanceUserIdByValue(refs.financeUser?.value || "", users);
 }
 
 function getReferrerName(referrerId) {
@@ -3505,14 +3596,23 @@ async function addReferralRemote() {
 function syncFinanceFormForRole() {
   const currentUser = getCurrentUser();
   const hasFinance = hasFeaturePermission(currentUser, "finance");
+  const canFundMode = hasFinance && canGrantFinanceToMembers(currentUser);
   const adminMode = hasFinance && isAdmin(currentUser);
-  const memberMode = hasFinance && currentUser && !isAdmin(currentUser);
+  const expenseMode = hasFinance && currentUser && !canFundMode;
+  const allowInputType = canFundMode && adminMode;
+  const rawType = normalizeFinanceTransactionType(refs.financeType?.value);
+  const hasTypeTouched = refs.financeType?.dataset?.touched === "true";
+  const selectedType = allowInputType ? (hasTypeTouched ? rawType || FINANCE_TYPE_OUT : FINANCE_TYPE_OUT) : FINANCE_TYPE_OUT;
+  const isInputMode = selectedType === FINANCE_TYPE_IN;
+  const isOutputMode = selectedType === FINANCE_TYPE_OUT;
+  const selectedTargetUserId = canFundMode && isOutputMode ? resolveFinanceUserId() : "";
+  const isTransferOut = Boolean(selectedTargetUserId && currentUser && selectedTargetUserId !== currentUser.id);
 
   if (refs.financeOpenExpenseBtn) {
-    refs.financeOpenExpenseBtn.classList.toggle("hidden", !memberMode);
+    refs.financeOpenExpenseBtn.classList.toggle("hidden", !expenseMode);
   }
   if (refs.financeCancelBtn) {
-    refs.financeCancelBtn.classList.toggle("hidden", !memberMode || !state.financeExpenseFormOpen);
+    refs.financeCancelBtn.classList.toggle("hidden", !expenseMode || !state.financeExpenseFormOpen);
   }
   if (refs.financeAdminStaffPanel) {
     refs.financeAdminStaffPanel.classList.toggle("hidden", !adminMode);
@@ -3528,27 +3628,33 @@ function syncFinanceFormForRole() {
   }
 
   if (refs.financeUserGroup) {
-    refs.financeUserGroup.classList.toggle("hidden", !adminMode);
+    refs.financeUserGroup.classList.toggle("hidden", !canFundMode || !isOutputMode);
   }
   if (refs.financeUser) {
-    refs.financeUser.disabled = !adminMode;
-    if (!adminMode) refs.financeUser.value = "";
+    refs.financeUser.disabled = !canFundMode || !isOutputMode;
+    if (!canFundMode || !isOutputMode) {
+      refs.financeUser.value = "";
+    }
   }
 
   if (refs.financeTypeGroup) {
-    refs.financeTypeGroup.classList.toggle("hidden", true);
+    refs.financeTypeGroup.classList.toggle("hidden", !canFundMode || !adminMode);
   }
   if (refs.financeType) {
-    refs.financeType.value = adminMode ? FINANCE_TYPE_IN : FINANCE_TYPE_OUT;
-    refs.financeType.disabled = true;
+    if (!allowInputType) {
+      refs.financeType.dataset.touched = "";
+    }
+    refs.financeType.value = selectedType;
+    refs.financeType.disabled = !canFundMode;
   }
 
   if (refs.financeCategoryGroup) {
-    refs.financeCategoryGroup.classList.toggle("hidden", !memberMode);
+    refs.financeCategoryGroup.classList.toggle("hidden", !(expenseMode || (canFundMode && isOutputMode && !isTransferOut)));
   }
   if (refs.financeCategory) {
-    refs.financeCategory.disabled = !memberMode;
-    if (!memberMode) {
+    const allowOutputFields = expenseMode || (canFundMode && isOutputMode && !isTransferOut);
+    refs.financeCategory.disabled = !allowOutputFields;
+    if (!allowOutputFields) {
       refs.financeCategory.value = "ADS";
     } else if (!normalizeFinanceExpenseCategory(refs.financeCategory.value)) {
       refs.financeCategory.value = "ADS";
@@ -3556,11 +3662,12 @@ function syncFinanceFormForRole() {
   }
 
   if (refs.financeReceiptGroup) {
-    refs.financeReceiptGroup.classList.toggle("hidden", !memberMode);
+    refs.financeReceiptGroup.classList.toggle("hidden", !(expenseMode || (canFundMode && isOutputMode && !isTransferOut)));
   }
   if (refs.financeReceipt) {
-    refs.financeReceipt.disabled = !memberMode;
-    if (!memberMode) {
+    const allowOutputFields = expenseMode || (canFundMode && isOutputMode && !isTransferOut);
+    refs.financeReceipt.disabled = !allowOutputFields;
+    if (!allowOutputFields) {
       clearFinanceReceiptSelection();
     } else {
       renderFinanceReceiptPreview();
@@ -3568,13 +3675,19 @@ function syncFinanceFormForRole() {
   }
 
   if (refs.financeSubmitBtn) {
-    refs.financeSubmitBtn.textContent = adminMode ? "Nhập tiền cho nhân viên" : "Lưu khoản xuất";
+    if (selectedType === FINANCE_TYPE_IN) {
+      refs.financeSubmitBtn.textContent = "Nạp tiền vào ví của bạn";
+    } else if (canFundMode && isTransferOut) {
+      refs.financeSubmitBtn.textContent = "Chuyển tiền cho nhân viên";
+    } else {
+      refs.financeSubmitBtn.textContent = "Lưu khoản xuất";
+    }
   }
 
   if (refs.financeForm) {
     if (!hasFinance) {
       refs.financeForm.classList.add("hidden");
-    } else if (adminMode) {
+    } else if (canFundMode) {
       refs.financeForm.classList.remove("hidden");
     } else {
       refs.financeForm.classList.toggle("hidden", !state.financeExpenseFormOpen);
@@ -3587,13 +3700,14 @@ function renderFinanceUserOptions() {
 
   const currentUser = getCurrentUser();
   const members = getMemberUsers();
+  const selectableUsers = getFinanceSelectableUsers(currentUser);
   const previousValue = refs.financeUser?.value || "";
   const previousReportUserId = refs.financeReportUser?.value || "";
 
-  refs.financeUserOptions.innerHTML = members
+  refs.financeUserOptions.innerHTML = selectableUsers
     .map(
       (member) =>
-        `<option data-id="${escapeHtml(member.id)}" value="${escapeHtml(member.fullName)} (${escapeHtml(member.username)})"></option>`,
+        `<option data-id="${escapeHtml(member.id)}" value="${escapeHtml(getFinanceUserLabel(member))}"></option>`,
     )
     .join("");
 
@@ -3610,14 +3724,10 @@ function renderFinanceUserOptions() {
   }
 
   if (refs.financeUser) {
-    if (isAdmin(currentUser)) {
-      if (previousValue) {
-        refs.financeUser.value = previousValue;
-      } else if (members[0]) {
-        refs.financeUser.value = `${members[0].fullName} (${members[0].username})`;
-      } else {
-        refs.financeUser.value = "";
-      }
+    if (canGrantFinanceToMembers(currentUser)) {
+      const resolvedPreviousUserId = resolveFinanceUserIdByValue(previousValue, selectableUsers);
+      const selectedUser = selectableUsers.find((item) => item.id === resolvedPreviousUserId);
+      refs.financeUser.value = selectedUser ? getFinanceUserLabel(selectedUser) : "";
     } else {
       refs.financeUser.value = "";
       state.financeSelectedUserId = "";
@@ -3673,27 +3783,41 @@ function readFinanceFormValues() {
   }
 
   let userId = currentUser.id;
+  const canFund = canGrantFinanceToMembers(currentUser);
+  const selectedMemberId = canFund ? resolveFinanceUserId() : "";
+  const isTransferOut = canFund && type === FINANCE_TYPE_OUT && selectedMemberId && selectedMemberId !== currentUser.id;
 
-  if (isAdmin(currentUser)) {
-    if (type !== FINANCE_TYPE_IN) {
-      refs.financeResult.textContent = "Quản trị viên chỉ được tạo giao dịch NHẬP.";
-      return null;
-    }
+  if (canFund) {
+    if (type === FINANCE_TYPE_IN) {
+      if (!isAdmin(currentUser)) {
+        refs.financeResult.textContent = "Chỉ quản trị viên được nạp thêm tiền vào ví của chính mình.";
+        return null;
+      }
+      userId = currentUser.id;
+    } else {
+      if (!isTransferOut && !category) {
+        refs.financeResult.textContent = "Vui lòng chọn danh mục xuất (Ads, Vận hành hoặc Khác).";
+        return null;
+      }
 
-    userId = resolveFinanceUserId();
-    if (!userId) {
-      refs.financeResult.textContent = "Vui lòng chọn tài khoản thành viên.";
-      return null;
-    }
+      if (isTransferOut) {
+        const exists = getMemberUsers().some((item) => item.id === selectedMemberId);
+        if (!exists) {
+          refs.financeResult.textContent = "Tài khoản ví không hợp lệ.";
+          return null;
+        }
+      }
 
-    const exists = getMemberUsers().some((item) => item.id === userId);
-    if (!exists) {
-      refs.financeResult.textContent = "Tài khoản ví không hợp lệ.";
-      return null;
+      const currentBalance = getFinanceBalanceByUserId(currentUser.id);
+      if (amount > currentBalance) {
+        refs.financeResult.textContent = "Số tồn hiện tại không đủ để thực hiện giao dịch XUẤT.";
+        return null;
+      }
+      userId = isTransferOut ? selectedMemberId : currentUser.id;
     }
   } else {
     if (type !== FINANCE_TYPE_OUT) {
-      refs.financeResult.textContent = "Nhân viên chỉ được ghi nhận giao dịch XUẤT.";
+      refs.financeResult.textContent = "Tài khoản này chỉ được ghi nhận giao dịch XUẤT.";
       return null;
     }
 
@@ -3728,17 +3852,33 @@ function readFinanceFormValues() {
     transactionDate,
     note,
     adjustment,
-    category: type === FINANCE_TYPE_OUT ? category : "",
-    receiptImage: type === FINANCE_TYPE_OUT ? receiptImage : null,
+    isTransferOut,
+    transferTargetUserId: isTransferOut ? selectedMemberId : "",
+    category: type === FINANCE_TYPE_OUT && !isTransferOut ? category : "",
+    receiptImage: type === FINANCE_TYPE_OUT && !isTransferOut ? receiptImage : null,
   };
 }
 
-function formatFinanceResultMessage(transaction) {
+function formatFinanceResultMessage(transaction, options = {}) {
   if (!transaction) return "Đã ghi nhận giao dịch tài chính.";
 
   const walletName = getUserDisplayName(transaction.userId);
-  const balance = getFinanceBalanceByUserId(transaction.userId);
+  const balance =
+    Number.isFinite(Number(options.balanceOverride)) ? Number(options.balanceOverride) : getFinanceBalanceByUserId(transaction.userId);
   const typeLabel = getFinanceTypeLabel(transaction.type);
+  const transferRole = String(transaction.transferRole || transaction.transfer_role || "")
+    .trim()
+    .toUpperCase();
+  const relatedMemberLabel = getFinanceRelatedMemberDisplay(transaction, { emptyLabel: "" });
+
+  if (transferRole === "OUT" && relatedMemberLabel) {
+    return `Đã ghi nhận ${typeLabel.toUpperCase()} ${formatMoney(transaction.amount)} từ ${walletName} sang ${relatedMemberLabel}. Số tồn hiện tại của ${walletName}: ${formatMoney(balance)}.`;
+  }
+
+  if (transferRole === "IN" && relatedMemberLabel) {
+    return `Đã ghi nhận ${typeLabel.toUpperCase()} ${formatMoney(transaction.amount)} vào ${walletName} từ ${relatedMemberLabel}. Số tồn hiện tại của ${walletName}: ${formatMoney(balance)}.`;
+  }
+
   return `Đã ghi nhận ${typeLabel.toUpperCase()} ${formatMoney(transaction.amount)} cho ${walletName}. Số tồn hiện tại: ${formatMoney(balance)}.`;
 }
 
@@ -3966,6 +4106,7 @@ function setFinanceTableHead(headers) {
 }
 
 function renderMemberFinance(currentUser) {
+  const canFund = canGrantFinanceToMembers(currentUser);
   const totals = getFinanceTotalsForUser(currentUser.id);
   const allRows = [...totals.rows].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   const recentExpenses = filterFinanceHistoryRows(
@@ -3977,7 +4118,9 @@ function renderMemberFinance(currentUser) {
   if (refs.financeExportCsvBtn) refs.financeExportCsvBtn.classList.remove("hidden");
 
   if (refs.financeRoleDesc) {
-    refs.financeRoleDesc.textContent = "Nhập giao dịch xuất của chính bạn, xem số tồn hiện tại và các khoản xuất gần nhất.";
+    refs.financeRoleDesc.textContent = canFund
+      ? "Bạn được phân quyền cấp tiền cho nhân viên. Dữ liệu hiển thị trong tab này vẫn là số liệu ví của chính bạn."
+      : "Nhập giao dịch xuất của chính bạn, xem số tồn hiện tại và các khoản xuất gần nhất.";
   }
   if (refs.financeHistoryTitle) {
     refs.financeHistoryTitle.textContent = "Khoản xuất gần nhất";
@@ -4005,10 +4148,10 @@ function renderMemberFinance(currentUser) {
   }
   renderAdminFinanceReport(allRows, [currentUser], { forceUserId: currentUser.id });
 
-  setFinanceTableHead(["Thời gian", "Danh mục", "Số tiền", "Nội dung", "Hóa đơn"]);
+  setFinanceTableHead(["Thời gian", "Nhân viên", "Danh mục", "Số tiền", "Nội dung", "Hóa đơn"]);
   if (recentExpenses.length === 0) {
     refs.financeTableBody.innerHTML =
-      '<tr><td class="empty-cell" colspan="5">Không có khoản xuất phù hợp bộ lọc hiện tại.</td></tr>';
+      '<tr><td class="empty-cell" colspan="6">Không có khoản xuất phù hợp bộ lọc hiện tại.</td></tr>';
     return;
   }
 
@@ -4017,6 +4160,7 @@ function renderMemberFinance(currentUser) {
       (item) => `
       <tr>
         <td>${new Date(item.createdAt || Date.now()).toLocaleString("vi-VN")}</td>
+        <td>${escapeHtml(getFinanceRelatedMemberDisplay(item, { currentUserId: currentUser.id, selfLabel: "Tự xuất" }))}</td>
         <td>${escapeHtml(getFinanceExpenseCategoryLabel(item.category))}</td>
         <td>${formatMoney(item.amount || 0)}</td>
         <td>${escapeHtml(item.note || "-")}</td>
@@ -4101,8 +4245,17 @@ function renderAdminFinance() {
     if (refs.financeHistoryTitle) {
       refs.financeHistoryTitle.textContent = "Lịch sử giao dịch";
     }
-    setFinanceTableHead(["Thời gian", "Loại", "Danh mục", "Số tiền", "Người thực hiện", "Nội dung", "Hóa đơn"]);
-    refs.financeTableBody.innerHTML = '<tr><td class="empty-cell" colspan="7">Chọn nhân viên để xem lịch sử giao dịch.</td></tr>';
+    setFinanceTableHead([
+      "Thời gian",
+      "Loại",
+      "Danh mục",
+      "Số tiền",
+      "Người thực hiện",
+      "Nhân viên liên quan",
+      "Nội dung",
+      "Hóa đơn",
+    ]);
+    refs.financeTableBody.innerHTML = '<tr><td class="empty-cell" colspan="8">Chọn nhân viên để xem lịch sử giao dịch.</td></tr>';
     return;
   }
 
@@ -4115,10 +4268,19 @@ function renderAdminFinance() {
 
   const userRows = filterFinanceHistoryRows(allRows.filter((item) => item.userId === state.financeSelectedUserId));
   setFinanceVisibleRows(userRows);
-  setFinanceTableHead(["Thời gian", "Loại", "Danh mục", "Số tiền", "Người thực hiện", "Nội dung", "Hóa đơn"]);
+  setFinanceTableHead([
+    "Thời gian",
+    "Loại",
+    "Danh mục",
+    "Số tiền",
+    "Người thực hiện",
+    "Nhân viên liên quan",
+    "Nội dung",
+    "Hóa đơn",
+  ]);
   if (userRows.length === 0) {
     refs.financeTableBody.innerHTML =
-      '<tr><td class="empty-cell" colspan="7">Không có giao dịch phù hợp bộ lọc hiện tại.</td></tr>';
+      '<tr><td class="empty-cell" colspan="8">Không có giao dịch phù hợp bộ lọc hiện tại.</td></tr>';
     return;
   }
 
@@ -4131,6 +4293,7 @@ function renderAdminFinance() {
         <td>${escapeHtml(getFinanceExpenseCategoryLabel(item.category))}</td>
         <td>${formatMoney(item.amount || 0)}</td>
         <td>${escapeHtml(getUserDisplayName(item.createdBy || item.created_by))}</td>
+        <td>${escapeHtml(getFinanceRelatedMemberDisplay(item, { emptyLabel: "-" }))}</td>
         <td>${escapeHtml(item.note || "-")}</td>
         <td>${formatFinanceAttachmentCell(item)}</td>
       </tr>
@@ -4154,24 +4317,73 @@ function addFinanceTransaction() {
     refs.financeResult.textContent = "Ngày giao dịch không hợp lệ.";
     return;
   }
-  const record = {
-    id: createId("fin"),
-    userId: values.userId,
-    type: values.type,
-    amount: values.amount,
-    category: values.category || "",
-    note: values.note,
-    isAdjustment: Boolean(values.adjustment),
-    adjustmentOf: "",
-    receiptImageDataUrl: values.receiptImage?.dataUrl || "",
-    receiptImageName: values.receiptImage?.name || "",
-    createdBy: currentUser.id,
-    created_by: currentUser.id,
-    createdAt,
-    timestamp: createdAt,
-  };
-
-  state.financeTransactions.unshift(record);
+  let resultTransaction = null;
+  if (values.isTransferOut && values.transferTargetUserId) {
+    const transferId = createId("ftr");
+    const inRecord = {
+      id: createId("fin"),
+      userId: values.transferTargetUserId,
+      type: FINANCE_TYPE_IN,
+      amount: values.amount,
+      category: "",
+      note: values.note,
+      isAdjustment: false,
+      adjustmentOf: "",
+      transferId,
+      transferRole: "IN",
+      transferCounterpartyUserId: currentUser.id,
+      receiptImageDataUrl: "",
+      receiptImageName: "",
+      createdBy: currentUser.id,
+      created_by: currentUser.id,
+      createdAt,
+      timestamp: createdAt,
+    };
+    const outRecord = {
+      id: createId("fin"),
+      userId: currentUser.id,
+      type: FINANCE_TYPE_OUT,
+      amount: values.amount,
+      category: "",
+      note: values.note,
+      isAdjustment: false,
+      adjustmentOf: "",
+      transferId,
+      transferRole: "OUT",
+      transferCounterpartyUserId: values.transferTargetUserId,
+      receiptImageDataUrl: "",
+      receiptImageName: "",
+      createdBy: currentUser.id,
+      created_by: currentUser.id,
+      createdAt,
+      timestamp: createdAt,
+    };
+    state.financeTransactions.unshift(inRecord);
+    state.financeTransactions.unshift(outRecord);
+    resultTransaction = outRecord;
+  } else {
+    const record = {
+      id: createId("fin"),
+      userId: values.userId,
+      type: values.type,
+      amount: values.amount,
+      category: values.category || "",
+      note: values.note,
+      isAdjustment: Boolean(values.adjustment),
+      adjustmentOf: "",
+      transferId: "",
+      transferRole: "",
+      transferCounterpartyUserId: "",
+      receiptImageDataUrl: values.receiptImage?.dataUrl || "",
+      receiptImageName: values.receiptImage?.name || "",
+      createdBy: currentUser.id,
+      created_by: currentUser.id,
+      createdAt,
+      timestamp: createdAt,
+    };
+    state.financeTransactions.unshift(record);
+    resultTransaction = record;
+  }
   normalizeAllRecords();
   saveState();
 
@@ -4181,8 +4393,8 @@ function addFinanceTransaction() {
   refs.financeNote.value = "";
   clearFinanceReceiptSelection();
   state.financeExpenseFormOpen = false;
-  state.financeSelectedUserId = values.userId;
-  refs.financeResult.textContent = formatFinanceResultMessage(record);
+  state.financeSelectedUserId = values.transferTargetUserId || values.userId;
+  refs.financeResult.textContent = formatFinanceResultMessage(resultTransaction);
   showModal(refs.financeResult.textContent);
   renderFinance();
 }
@@ -4213,8 +4425,10 @@ async function addFinanceTransactionRemote() {
     refs.financeNote.value = "";
     clearFinanceReceiptSelection();
     state.financeExpenseFormOpen = false;
-    state.financeSelectedUserId = values.userId;
-    refs.financeResult.textContent = formatFinanceResultMessage(savedTransaction);
+    state.financeSelectedUserId = values.transferTargetUserId || values.userId;
+    refs.financeResult.textContent = formatFinanceResultMessage(savedTransaction, {
+      balanceOverride: payload?.targetBalance,
+    });
     showModal(refs.financeResult.textContent);
     renderFinance();
   } catch (error) {
@@ -4315,6 +4529,7 @@ function addMemberAccount() {
       referralsEdit: Boolean(refs.permVisitsEdit.checked),
       referralsDelete: Boolean(refs.permVisitsDelete.checked),
       finance: Boolean(refs.permFinance.checked),
+      financeFund: Boolean(refs.permFinanceFund.checked),
       dataCleanup: Boolean(refs.permDataCleanup.checked),
       backupData: Boolean(refs.permBackupData.checked),
       changePassword: Boolean(refs.permChangePassword.checked),
@@ -4379,6 +4594,7 @@ async function addMemberAccountRemote() {
           referralsEdit: Boolean(refs.permVisitsEdit.checked),
           referralsDelete: Boolean(refs.permVisitsDelete.checked),
           finance: Boolean(refs.permFinance.checked),
+          financeFund: Boolean(refs.permFinanceFund.checked),
           dataCleanup: Boolean(refs.permDataCleanup.checked),
           backupData: Boolean(refs.permBackupData.checked),
           changePassword: Boolean(refs.permChangePassword.checked),
@@ -5226,7 +5442,7 @@ function renderUserAccounts() {
   const currentUser = getCurrentUser();
   if (!isAdmin(currentUser)) {
     refs.userTableBody.innerHTML =
-      '<tr><td class="empty-cell" colspan="24">Chỉ quản trị viên được xem danh sách tài khoản.</td></tr>';
+      '<tr><td class="empty-cell" colspan="25">Chỉ quản trị viên được xem danh sách tài khoản.</td></tr>';
     return;
   }
 
@@ -5256,6 +5472,7 @@ function renderUserAccounts() {
           <tr>
             <td>${escapeHtml(user.fullName)} (Quản trị viên)</td>
             <td>${escapeHtml(user.username)}</td>
+            <td>Toàn quyền</td>
             <td>Toàn quyền</td>
             <td>Toàn quyền</td>
             <td>Toàn quyền</td>
@@ -5295,6 +5512,7 @@ function renderUserAccounts() {
           ${renderPermissionCheckbox(user.id, "visitsEdit", serviceEdit)}
           ${renderPermissionCheckbox(user.id, "visitsDelete", serviceDelete)}
           ${renderPermissionCheckbox(user.id, "finance", permissions.finance)}
+          ${renderPermissionCheckbox(user.id, "financeFund", permissions.financeFund)}
           ${renderPermissionCheckbox(user.id, "referrals", serviceAccess, "hidden")}
           ${renderPermissionCheckbox(user.id, "referralsEdit", serviceEdit, "hidden")}
           ${renderPermissionCheckbox(user.id, "referralsDelete", serviceDelete, "hidden")}
@@ -5407,6 +5625,30 @@ function normalizeAllRecords() {
               : typeof item.adjustment_of === "string"
                 ? item.adjustment_of
                 : "";
+          const transferId =
+            typeof item.transferId === "string"
+              ? item.transferId
+              : typeof item.transfer_id === "string"
+                ? item.transfer_id
+                : "";
+          const transferRoleRaw =
+            typeof item.transferRole === "string"
+              ? item.transferRole
+              : typeof item.transfer_role === "string"
+                ? item.transfer_role
+                : "";
+          const transferRoleNormalized = String(transferRoleRaw || "")
+            .trim()
+            .toUpperCase();
+          const transferRole = transferRoleNormalized === "IN" || transferRoleNormalized === "OUT" ? transferRoleNormalized : "";
+          const transferCounterpartyUserId =
+            typeof item.transferCounterpartyUserId === "string"
+              ? item.transferCounterpartyUserId
+              : typeof item.transfer_counterparty_user_id === "string"
+                ? item.transfer_counterparty_user_id
+                : typeof item.counterpartyUserId === "string"
+                  ? item.counterpartyUserId
+                  : "";
           const isAdjustment = Boolean(item.isAdjustment || item.adjustment) || Boolean(adjustmentOf) || isAdjustmentFinanceNote(note);
           const createdBy =
             typeof item.createdBy === "string"
@@ -5429,6 +5671,9 @@ function normalizeAllRecords() {
             note,
             isAdjustment,
             adjustmentOf,
+            transferId,
+            transferRole,
+            transferCounterpartyUserId,
             receiptImageDataUrl: type === FINANCE_TYPE_OUT ? safeReceiptImageDataUrl : "",
             receiptImageName: type === FINANCE_TYPE_OUT ? safeReceiptImageName : "",
             createdBy,

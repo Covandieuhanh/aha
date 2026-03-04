@@ -36,6 +36,7 @@ const ADMIN_PERMISSIONS = {
   referralsEdit: true,
   referralsDelete: true,
   finance: true,
+  financeFund: true,
   reports: true,
   reportsAll: true,
   dataCleanup: true,
@@ -112,6 +113,7 @@ function defaultMemberPermissions() {
     referralsEdit: false,
     referralsDelete: false,
     finance: false,
+    financeFund: false,
     reports: true,
     reportsAll: false,
     dataCleanup: false,
@@ -137,6 +139,7 @@ function buildMemberPermissions(rawPermissions) {
     referralsEdit: Boolean(source.referralsEdit ?? defaults.referralsEdit),
     referralsDelete: Boolean(source.referralsDelete ?? defaults.referralsDelete),
     finance: Boolean(source.finance ?? defaults.finance),
+    financeFund: Boolean(source.financeFund ?? defaults.financeFund),
     reports: Boolean(source.reports ?? defaults.reports),
     reportsAll: Boolean(source.reportsAll ?? defaults.reportsAll),
     dataCleanup: Boolean(source.dataCleanup ?? defaults.dataCleanup),
@@ -238,7 +241,8 @@ function normalizeFinanceReceiptInput(rawReceipt) {
 }
 
 function buildFinanceLedgerPayload(transaction, previousHash) {
-  return JSON.stringify({
+  const integrityVersion = Number(transaction.integrityVersion) > 0 ? Number(transaction.integrityVersion) : 1;
+  const payload = {
     id: transaction.id || "",
     userId: transaction.userId || "",
     type: transaction.type || "",
@@ -252,7 +256,13 @@ function buildFinanceLedgerPayload(transaction, previousHash) {
     isAdjustment: Boolean(transaction.isAdjustment),
     adjustmentOf: transaction.adjustmentOf || "",
     previousHash: previousHash || FINANCE_LEDGER_GENESIS,
-  });
+  };
+  if (integrityVersion >= 2) {
+    payload.transferId = transaction.transferId || "";
+    payload.transferRole = transaction.transferRole || "";
+    payload.transferCounterpartyUserId = transaction.transferCounterpartyUserId || "";
+  }
+  return JSON.stringify(payload);
 }
 
 function signFinanceLedgerEntry(transaction, previousHash) {
@@ -577,6 +587,30 @@ function normalizeAllRecords(state) {
               : typeof item.adjustment_of === "string"
                 ? item.adjustment_of
                 : "";
+          const transferId =
+            typeof item.transferId === "string"
+              ? item.transferId
+              : typeof item.transfer_id === "string"
+                ? item.transfer_id
+                : "";
+          const transferRoleRaw =
+            typeof item.transferRole === "string"
+              ? item.transferRole
+              : typeof item.transfer_role === "string"
+                ? item.transfer_role
+                : "";
+          const transferRoleNormalized = String(transferRoleRaw || "")
+            .trim()
+            .toUpperCase();
+          const transferRole = transferRoleNormalized === "IN" || transferRoleNormalized === "OUT" ? transferRoleNormalized : "";
+          const transferCounterpartyUserId =
+            typeof item.transferCounterpartyUserId === "string"
+              ? item.transferCounterpartyUserId
+              : typeof item.transfer_counterparty_user_id === "string"
+                ? item.transfer_counterparty_user_id
+                : typeof item.counterpartyUserId === "string"
+                  ? item.counterpartyUserId
+                  : "";
           const isAdjustment = Boolean(item.isAdjustment || item.adjustment) || Boolean(adjustmentOf) || isAdjustmentNote(rawNote);
           const noteBase = isAdjustment ? normalizeAdjustmentNote(rawNote) : normalizeTextValue(rawNote);
           const note = noteBase || "Không có mô tả";
@@ -590,6 +624,9 @@ function normalizeAllRecords(state) {
             note,
             isAdjustment,
             adjustmentOf,
+            transferId,
+            transferRole,
+            transferCounterpartyUserId,
             receiptImageDataUrl,
             receiptImageName,
             createdBy,
@@ -1567,53 +1604,60 @@ function addFinanceTransaction(requestUser, input) {
     note = normalizeAdjustmentNote(note);
   }
 
-  let targetUserId = requestUser.id;
+  const canFund = hasFeaturePermission(requestUser, "financeFund");
+  const isTransferOut = type === FINANCE_TYPE_OUT && requestedUserId && requestedUserId !== requestUser.id;
+  let transferTargetUserId = "";
+  let walletUserId = requestUser.id;
 
-  if (requestUser.role === "admin") {
-    if (type !== FINANCE_TYPE_IN) {
-      throw httpError(403, "Quản trị viên chỉ được tạo giao dịch NHẬP.");
+  if (type === FINANCE_TYPE_IN) {
+    if (requestUser.role !== "admin") {
+      throw httpError(403, "Chỉ quản trị viên được nạp thêm tiền vào ví của chính mình.");
     }
-
-    if (!requestedUserId) {
-      throw httpError(400, "Vui lòng chọn tài khoản thành viên cần ghi nhận ví.");
-    }
-
-    const targetUser = state.users.find((item) => item.id === requestedUserId && item.role === "member");
-    if (!targetUser) {
-      throw httpError(400, "Tài khoản ví không hợp lệ.");
-    }
-
-    targetUserId = targetUser.id;
-  } else {
-    if (type !== FINANCE_TYPE_OUT) {
-      throw httpError(403, "Nhân viên chỉ được tạo giao dịch XUẤT.");
-    }
-
-    if (!FINANCE_EXPENSE_CATEGORIES.has(category)) {
-      throw httpError(400, "Danh mục xuất không hợp lệ. Chỉ chấp nhận Ads, Vận hành hoặc Khác.");
-    }
-
     if (requestedUserId && requestedUserId !== requestUser.id) {
-      throw httpError(403, "Bạn chỉ được ghi nhận giao dịch cho ví của chính mình.");
+      throw httpError(400, "Giao dịch NHẬP chỉ áp dụng cho ví của chính bạn.");
+    }
+    walletUserId = requestUser.id;
+  } else {
+    if (isTransferOut) {
+      if (!canFund) {
+        throw httpError(403, "Bạn chưa có quyền cấp tiền cho nhân viên. Vui lòng liên hệ quản trị viên.");
+      }
+
+      const targetUser = state.users.find((item) => item.id === requestedUserId && item.role === "member");
+      if (!targetUser) {
+        throw httpError(400, "Tài khoản ví không hợp lệ.");
+      }
+      transferTargetUserId = targetUser.id;
+    } else {
+      if (!FINANCE_EXPENSE_CATEGORIES.has(category)) {
+        throw httpError(400, "Danh mục xuất không hợp lệ. Chỉ chấp nhận Ads, Vận hành hoặc Khác.");
+      }
+      if (requestedUserId && requestedUserId !== requestUser.id) {
+        throw httpError(403, "Bạn chỉ được ghi nhận giao dịch cho ví của chính mình.");
+      }
     }
 
-    const currentBalance = getFinanceBalanceForUser(targetUserId);
+    const currentBalance = getFinanceBalanceForUser(requestUser.id);
     if (amount > currentBalance) {
       throw httpError(409, "Số tồn hiện tại không đủ để thực hiện giao dịch XUẤT.");
     }
+    walletUserId = requestUser.id;
   }
 
-  if (type === FINANCE_TYPE_OUT) {
+  if (type === FINANCE_TYPE_OUT && !isTransferOut) {
     receipt = normalizeFinanceReceiptInput(receiptInputRaw);
   }
 
   let adjustmentOf = "";
+  if (isTransferOut && requestedAdjustmentOf) {
+    throw httpError(400, "Chuyển tiền nội bộ không hỗ trợ adjustmentOf. Hãy tạo giao dịch điều chỉnh riêng.");
+  }
   if (requestedAdjustmentOf) {
     const reference = state.financeTransactions.find((item) => item.id === requestedAdjustmentOf);
     if (!reference || reference.integrityValid === false) {
       throw httpError(400, "Không tìm thấy giao dịch gốc hợp lệ để điều chỉnh.");
     }
-    if (reference.userId !== targetUserId) {
+    if (reference.userId !== walletUserId) {
       throw httpError(400, "Giao dịch điều chỉnh phải áp dụng cho cùng một ví nhân viên.");
     }
     adjustmentOf = reference.id;
@@ -1626,49 +1670,128 @@ function addFinanceTransaction(requestUser, input) {
     throw httpError(400, "Ngày giao dịch không hợp lệ.");
   }
   const previousHash = state.financeTransactions[0]?.integrityHash || FINANCE_LEDGER_GENESIS;
-  const transaction = {
-    id: createId("fin"),
-    userId: targetUserId,
-    type,
-    amount,
-    category: type === FINANCE_TYPE_OUT ? category : "",
-    note,
-    isAdjustment,
-    adjustmentOf,
-    receiptImageDataUrl: type === FINANCE_TYPE_OUT ? receipt.receiptImageDataUrl : "",
-    receiptImageName: type === FINANCE_TYPE_OUT ? receipt.receiptImageName : "",
-    createdBy: requestUser.id,
-    created_by: requestUser.id,
-    createdAt,
-    timestamp: createdAt,
-    integrityPrevHash: previousHash,
-    integrityVersion: 1,
-  };
-  transaction.integrityHash = signFinanceLedgerEntry(transaction, previousHash);
-  transaction.integrityValid = true;
-
-  state.financeTransactions.unshift(transaction);
-  appendSystemAuditLog({
-    domain: FINANCE_LOG_DOMAIN,
-    action: "FINANCE_TRANSACTION_CREATED",
-    actorId: requestUser.id,
-    walletUserId: targetUserId,
-    transactionId: transaction.id,
-    createdAt,
-    details: {
-      type,
+  const signTransaction = (payload, prevHash) => {
+    const record = {
+      id: createId("fin"),
+      userId: payload.userId,
+      type: payload.type,
       amount,
-      category: transaction.category || "",
-      note,
-      isAdjustment,
-      adjustmentOf: adjustmentOf || "",
-      hasReceiptImage: Boolean(transaction.receiptImageDataUrl),
-    },
-  });
+      category: payload.category || "",
+      note: payload.note || "",
+      isAdjustment: Boolean(payload.isAdjustment),
+      adjustmentOf: payload.adjustmentOf || "",
+      transferId: payload.transferId || "",
+      transferRole: payload.transferRole || "",
+      transferCounterpartyUserId: payload.transferCounterpartyUserId || "",
+      receiptImageDataUrl: payload.receiptImageDataUrl || "",
+      receiptImageName: payload.receiptImageName || "",
+      createdBy: requestUser.id,
+      created_by: requestUser.id,
+      createdAt,
+      timestamp: createdAt,
+      integrityPrevHash: prevHash,
+      integrityVersion: 1,
+    };
+    record.integrityHash = signFinanceLedgerEntry(record, prevHash);
+    record.integrityValid = true;
+    return record;
+  };
+
+  let resultTransaction = null;
+  if (isTransferOut && transferTargetUserId) {
+    const transferId = createId("ftr");
+    const inTransaction = signTransaction(
+      {
+        userId: transferTargetUserId,
+        type: FINANCE_TYPE_IN,
+        category: "",
+        note,
+        isAdjustment: false,
+        adjustmentOf: "",
+        transferId,
+        transferRole: "IN",
+        transferCounterpartyUserId: requestUser.id,
+      },
+      previousHash,
+    );
+    const outTransaction = signTransaction(
+      {
+        userId: requestUser.id,
+        type: FINANCE_TYPE_OUT,
+        category: "",
+        note,
+        isAdjustment: false,
+        adjustmentOf: "",
+        transferId,
+        transferRole: "OUT",
+        transferCounterpartyUserId: transferTargetUserId,
+      },
+      inTransaction.integrityHash,
+    );
+    state.financeTransactions.unshift(inTransaction);
+    state.financeTransactions.unshift(outTransaction);
+    resultTransaction = outTransaction;
+
+    appendSystemAuditLog({
+      domain: FINANCE_LOG_DOMAIN,
+      action: "FINANCE_INTERNAL_TRANSFER_CREATED",
+      actorId: requestUser.id,
+      walletUserId: transferTargetUserId,
+      transactionId: outTransaction.id,
+      createdAt,
+      details: {
+        transferId,
+        senderUserId: requestUser.id,
+        receiverUserId: transferTargetUserId,
+        debitTransactionId: outTransaction.id,
+        creditTransactionId: inTransaction.id,
+        amount,
+        note,
+      },
+    });
+  } else {
+    const transaction = signTransaction(
+      {
+        userId: walletUserId,
+        type,
+        category: type === FINANCE_TYPE_OUT ? category : "",
+        note,
+        isAdjustment,
+        adjustmentOf,
+        transferId: "",
+        transferRole: "",
+        transferCounterpartyUserId: "",
+        receiptImageDataUrl: type === FINANCE_TYPE_OUT ? receipt.receiptImageDataUrl : "",
+        receiptImageName: type === FINANCE_TYPE_OUT ? receipt.receiptImageName : "",
+      },
+      previousHash,
+    );
+    state.financeTransactions.unshift(transaction);
+    resultTransaction = transaction;
+
+    appendSystemAuditLog({
+      domain: FINANCE_LOG_DOMAIN,
+      action: "FINANCE_TRANSACTION_CREATED",
+      actorId: requestUser.id,
+      walletUserId: walletUserId,
+      transactionId: transaction.id,
+      createdAt,
+      details: {
+        type,
+        amount,
+        category: transaction.category || "",
+        note,
+        isAdjustment,
+        adjustmentOf: adjustmentOf || "",
+        hasReceiptImage: Boolean(transaction.receiptImageDataUrl),
+      },
+    });
+  }
   persist();
 
   return {
-    transaction: clone(transaction),
+    transaction: clone(resultTransaction),
+    targetBalance: resultTransaction ? getFinanceBalanceForUser(resultTransaction.userId) : 0,
     financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
   };
 }
