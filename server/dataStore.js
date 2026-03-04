@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 
 const DATA_DIR = path.join(__dirname, "..", "data");
@@ -8,6 +9,19 @@ const persistListeners = [];
 
 const DEFAULT_ADMIN_USERNAME = process.env.AHA_ADMIN_USERNAME || "admin";
 const DEFAULT_ADMIN_PASSWORD = process.env.AHA_ADMIN_PASSWORD || "admin123";
+const FINANCE_LEDGER_SECRET =
+  process.env.AHA_FINANCE_LEDGER_SECRET ||
+  process.env.SESSION_SECRET ||
+  `${DEFAULT_ADMIN_USERNAME}:${DEFAULT_ADMIN_PASSWORD}:finance-ledger`;
+const FINANCE_LEDGER_GENESIS = "GENESIS";
+const FINANCE_LOG_DOMAIN = "finance";
+const MAX_SYSTEM_AUDIT_LOGS = 20000;
+const ADJUSTMENT_NOTE_PREFIX = "[ĐIỀU CHỈNH]";
+const MAX_FINANCE_RECEIPT_DATA_URL_LENGTH = 4 * 1024 * 1024;
+const FINANCE_EXPENSE_CATEGORIES = new Set(["ADS", "OPERATIONS", "OTHER"]);
+const FINANCE_TYPE_IN = "NHAP";
+const FINANCE_TYPE_OUT = "XUAT";
+let lastFinanceIntegrityAlertKey = "";
 
 const ADMIN_PERMISSIONS = {
   customers: true,
@@ -21,6 +35,7 @@ const ADMIN_PERMISSIONS = {
   referrals: true,
   referralsEdit: true,
   referralsDelete: true,
+  finance: true,
   reports: true,
   reportsAll: true,
   dataCleanup: true,
@@ -56,6 +71,22 @@ function isDayInRange(dayValue, fromDate, toDate) {
   return dayValue >= fromDate && dayValue <= toDate;
 }
 
+function buildFinanceCreatedAt(transactionDate) {
+  const now = new Date();
+  if (!transactionDate) {
+    return now.toISOString();
+  }
+
+  if (!isValidDay(transactionDate)) {
+    return "";
+  }
+
+  const timePart = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+  const createdAt = `${transactionDate}T${timePart}`;
+  const parsed = new Date(createdAt);
+  return Number.isNaN(parsed.getTime()) ? "" : createdAt;
+}
+
 function getRateByOccurrence(occurrence) {
   const step = Math.min(Math.max(Number(occurrence) || 0, 1), 10);
   return step * 0.05;
@@ -80,6 +111,7 @@ function defaultMemberPermissions() {
     referrals: false,
     referralsEdit: false,
     referralsDelete: false,
+    finance: false,
     reports: true,
     reportsAll: false,
     dataCleanup: false,
@@ -104,11 +136,229 @@ function buildMemberPermissions(rawPermissions) {
     referrals: Boolean(source.referrals ?? defaults.referrals),
     referralsEdit: Boolean(source.referralsEdit ?? defaults.referralsEdit),
     referralsDelete: Boolean(source.referralsDelete ?? defaults.referralsDelete),
+    finance: Boolean(source.finance ?? defaults.finance),
     reports: Boolean(source.reports ?? defaults.reports),
     reportsAll: Boolean(source.reportsAll ?? defaults.reportsAll),
     dataCleanup: Boolean(source.dataCleanup ?? defaults.dataCleanup),
     backupData: Boolean(source.backupData ?? defaults.backupData),
     changePassword: Boolean(source.changePassword ?? defaults.changePassword),
+  };
+}
+
+function normalizeTextValue(value) {
+  return String(value || "").trim();
+}
+
+function isAdjustmentNote(note) {
+  const normalized = String(note || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return false;
+  return normalized.includes("điều chỉnh") || normalized.includes("dieu chinh");
+}
+
+function normalizeAdjustmentNote(note) {
+  const normalized = normalizeTextValue(note);
+  if (!normalized) {
+    return `${ADJUSTMENT_NOTE_PREFIX} Điều chỉnh số liệu.`;
+  }
+
+  if (isAdjustmentNote(normalized)) {
+    return normalized;
+  }
+
+  return `${ADJUSTMENT_NOTE_PREFIX} ${normalized}`;
+}
+
+function normalizeFinanceExpenseCategory(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (normalized === "ADS") return "ADS";
+  if (normalized === "OPERATIONS") return "OPERATIONS";
+  if (normalized === "OTHER") return "OTHER";
+  return "";
+}
+
+function normalizeFinanceTransactionType(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (normalized === "THU" || normalized === FINANCE_TYPE_IN) return FINANCE_TYPE_IN;
+  if (normalized === "CHI" || normalized === FINANCE_TYPE_OUT) return FINANCE_TYPE_OUT;
+  return "";
+}
+
+function isValidFinanceReceiptDataUrl(dataUrl) {
+  if (typeof dataUrl !== "string") return false;
+  const normalized = dataUrl.trim();
+  if (!normalized) return false;
+  if (!normalized.startsWith("data:image/")) return false;
+  if (!normalized.includes(";base64,")) return false;
+  if (normalized.length > MAX_FINANCE_RECEIPT_DATA_URL_LENGTH) return false;
+  return true;
+}
+
+function normalizeFinanceReceiptInput(rawReceipt) {
+  const receipt = rawReceipt && typeof rawReceipt === "object" ? rawReceipt : {};
+
+  const dataUrlCandidate =
+    typeof receipt.dataUrl === "string"
+      ? receipt.dataUrl
+      : typeof receipt.receiptImageDataUrl === "string"
+        ? receipt.receiptImageDataUrl
+        : typeof rawReceipt === "string"
+          ? rawReceipt
+          : "";
+  const dataUrl = typeof dataUrlCandidate === "string" ? dataUrlCandidate.trim() : "";
+  if (!dataUrl) {
+    return {
+      receiptImageDataUrl: "",
+      receiptImageName: "",
+    };
+  }
+
+  if (!isValidFinanceReceiptDataUrl(dataUrl)) {
+    throw httpError(400, "Ảnh hóa đơn không hợp lệ hoặc vượt quá dung lượng cho phép.");
+  }
+
+  const nameCandidate =
+    typeof receipt.name === "string"
+      ? receipt.name
+      : typeof receipt.receiptImageName === "string"
+        ? receipt.receiptImageName
+        : "hoa-don";
+  const name = normalizeTextValue(nameCandidate).slice(0, 180) || "hoa-don";
+
+  return {
+    receiptImageDataUrl: dataUrl,
+    receiptImageName: name,
+  };
+}
+
+function buildFinanceLedgerPayload(transaction, previousHash) {
+  return JSON.stringify({
+    id: transaction.id || "",
+    userId: transaction.userId || "",
+    type: transaction.type || "",
+    amount: Number(transaction.amount) || 0,
+    category: transaction.category || "",
+    note: transaction.note || "",
+    receiptImageDataUrl: transaction.receiptImageDataUrl || "",
+    receiptImageName: transaction.receiptImageName || "",
+    createdBy: transaction.createdBy || "",
+    createdAt: transaction.createdAt || "",
+    isAdjustment: Boolean(transaction.isAdjustment),
+    adjustmentOf: transaction.adjustmentOf || "",
+    previousHash: previousHash || FINANCE_LEDGER_GENESIS,
+  });
+}
+
+function signFinanceLedgerEntry(transaction, previousHash) {
+  const payload = buildFinanceLedgerPayload(transaction, previousHash);
+  return crypto.createHmac("sha256", FINANCE_LEDGER_SECRET).update(payload).digest("hex");
+}
+
+function appendSystemAuditLog(entry) {
+  if (!Array.isArray(state.systemAuditLogs)) {
+    state.systemAuditLogs = [];
+  }
+
+  const details =
+    entry?.details && typeof entry.details === "object" && !Array.isArray(entry.details) ? clone(entry.details) : {};
+
+  const record = {
+    id: createId("audit"),
+    domain:
+      typeof entry?.domain === "string" && entry.domain.trim()
+        ? entry.domain.trim().toLowerCase()
+        : "system",
+    action:
+      typeof entry?.action === "string" && entry.action.trim()
+        ? entry.action.trim().toUpperCase()
+        : "UNKNOWN_ACTION",
+    actorId: typeof entry?.actorId === "string" ? entry.actorId : "",
+    walletUserId: typeof entry?.walletUserId === "string" ? entry.walletUserId : "",
+    transactionId: typeof entry?.transactionId === "string" ? entry.transactionId : "",
+    createdAt: typeof entry?.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
+    details,
+  };
+
+  state.systemAuditLogs.unshift(record);
+  if (state.systemAuditLogs.length > MAX_SYSTEM_AUDIT_LOGS) {
+    state.systemAuditLogs.length = MAX_SYSTEM_AUDIT_LOGS;
+  }
+
+  return record;
+}
+
+function applyFinanceLedgerIntegrity(transactions) {
+  const rows = Array.isArray(transactions) ? transactions : [];
+  if (rows.length === 0) {
+    return {
+      migratedLegacyLedger: false,
+      invalidCount: 0,
+      invalidTransactionIds: [],
+    };
+  }
+
+  const hasAnyIntegrity = rows.some(
+    (item) =>
+      typeof item.integrityHash === "string" &&
+      item.integrityHash &&
+      typeof item.integrityPrevHash === "string" &&
+      item.integrityPrevHash,
+  );
+
+  let invalidCount = 0;
+  const invalidTransactionIds = [];
+
+  if (!hasAnyIntegrity) {
+    let expectedPrevHash = FINANCE_LEDGER_GENESIS;
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index];
+      row.integrityPrevHash = expectedPrevHash;
+      row.integrityHash = signFinanceLedgerEntry(row, expectedPrevHash);
+      row.integrityVersion = 1;
+      row.integrityValid = true;
+      expectedPrevHash = row.integrityHash;
+    }
+
+    return {
+      migratedLegacyLedger: true,
+      invalidCount: 0,
+      invalidTransactionIds,
+    };
+  }
+
+  let expectedPrevHash = FINANCE_LEDGER_GENESIS;
+  let chainBroken = false;
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    const prevHash = typeof row.integrityPrevHash === "string" ? row.integrityPrevHash : "";
+    const rowHash = typeof row.integrityHash === "string" ? row.integrityHash : "";
+    const expectedHash = signFinanceLedgerEntry(row, expectedPrevHash);
+
+    const validRow = !chainBroken && prevHash === expectedPrevHash && rowHash === expectedHash;
+    row.integrityVersion = 1;
+    row.integrityValid = validRow;
+
+    if (!validRow) {
+      invalidCount += 1;
+      invalidTransactionIds.push(row.id);
+      chainBroken = true;
+    }
+
+    if (rowHash) {
+      expectedPrevHash = rowHash;
+    }
+  }
+
+  return {
+    migratedLegacyLedger: false,
+    invalidCount,
+    invalidTransactionIds,
   };
 }
 
@@ -239,6 +489,150 @@ function normalizeAllRecords(state) {
         .filter((item) => item.endpoint && item.userId && item.keys?.p256dh && item.keys?.auth)
     : [];
 
+  state.systemAuditLogs = Array.isArray(state.systemAuditLogs)
+    ? state.systemAuditLogs
+        .filter((item) => item && typeof item === "object")
+        .map((item) => ({
+          id: typeof item.id === "string" && item.id ? item.id : createId("audit"),
+          domain:
+            typeof item.domain === "string" && item.domain.trim()
+              ? item.domain.trim().toLowerCase()
+              : "system",
+          action:
+            typeof item.action === "string" && item.action.trim()
+              ? item.action.trim().toUpperCase()
+              : "UNKNOWN_ACTION",
+          actorId: typeof item.actorId === "string" ? item.actorId : "",
+          walletUserId:
+            typeof item.walletUserId === "string"
+              ? item.walletUserId
+              : typeof item.userId === "string"
+                ? item.userId
+                : "",
+          transactionId:
+            typeof item.transactionId === "string"
+              ? item.transactionId
+              : typeof item.targetId === "string"
+                ? item.targetId
+                : "",
+          createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString(),
+          details:
+            item.details && typeof item.details === "object" && !Array.isArray(item.details) ? item.details : {},
+        }))
+        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+        .slice(0, MAX_SYSTEM_AUDIT_LOGS)
+    : [];
+
+  let shouldResetFinanceIntegrity = false;
+  state.financeTransactions = Array.isArray(state.financeTransactions)
+    ? state.financeTransactions
+        .filter((item) => item && typeof item === "object")
+        .map((item) => {
+          const typeRaw = typeof item.type === "string" ? item.type.trim().toUpperCase() : "";
+          const type = normalizeFinanceTransactionType(typeRaw);
+          if (typeRaw === "THU" || typeRaw === "CHI") {
+            shouldResetFinanceIntegrity = true;
+          }
+          const amount = Number(item.amount || 0);
+          const userId = typeof item.userId === "string" ? item.userId : "";
+          const rawNote = typeof item.note === "string" ? item.note : "";
+          const rawCategory = normalizeFinanceExpenseCategory(item.category);
+          const category = type === FINANCE_TYPE_OUT ? rawCategory : "";
+          const rawReceiptImageDataUrl =
+            typeof item.receiptImageDataUrl === "string"
+              ? item.receiptImageDataUrl
+              : typeof item.receipt_image_data_url === "string"
+                ? item.receipt_image_data_url
+                : typeof item.receiptImage?.dataUrl === "string"
+                  ? item.receiptImage.dataUrl
+                  : "";
+          const rawReceiptImageName =
+            typeof item.receiptImageName === "string"
+              ? item.receiptImageName
+              : typeof item.receipt_image_name === "string"
+                ? item.receipt_image_name
+                : typeof item.receiptImage?.name === "string"
+                  ? item.receiptImage.name
+                  : "";
+          const receiptImageDataUrl =
+            type === FINANCE_TYPE_OUT && isValidFinanceReceiptDataUrl(rawReceiptImageDataUrl)
+              ? rawReceiptImageDataUrl.trim()
+              : "";
+          const receiptImageName = receiptImageDataUrl ? normalizeTextValue(rawReceiptImageName).slice(0, 180) || "hoa-don" : "";
+          const createdBy =
+            typeof item.createdBy === "string"
+              ? item.createdBy
+              : typeof item.created_by === "string"
+                ? item.created_by
+                : "";
+          const createdAt =
+            typeof item.createdAt === "string"
+              ? item.createdAt
+              : typeof item.timestamp === "string"
+                ? item.timestamp
+                : new Date().toISOString();
+          const adjustmentOf =
+            typeof item.adjustmentOf === "string"
+              ? item.adjustmentOf
+              : typeof item.adjustment_of === "string"
+                ? item.adjustment_of
+                : "";
+          const isAdjustment = Boolean(item.isAdjustment || item.adjustment) || Boolean(adjustmentOf) || isAdjustmentNote(rawNote);
+          const noteBase = isAdjustment ? normalizeAdjustmentNote(rawNote) : normalizeTextValue(rawNote);
+          const note = noteBase || "Không có mô tả";
+
+          return {
+            id: typeof item.id === "string" && item.id ? item.id : createId("fin"),
+            userId,
+            type,
+            amount: Number.isFinite(amount) && amount > 0 ? amount : 0,
+            category,
+            note,
+            isAdjustment,
+            adjustmentOf,
+            receiptImageDataUrl,
+            receiptImageName,
+            createdBy,
+            created_by: createdBy,
+            createdAt,
+            timestamp: createdAt,
+            integrityPrevHash:
+              shouldResetFinanceIntegrity || typeof item.integrityPrevHash !== "string" ? "" : item.integrityPrevHash,
+            integrityHash: shouldResetFinanceIntegrity || typeof item.integrityHash !== "string" ? "" : item.integrityHash,
+            integrityVersion: Number(item.integrityVersion) > 0 ? Number(item.integrityVersion) : 1,
+            integrityValid: true,
+          };
+        })
+        .filter((item) => item.userId && item.type && item.amount > 0)
+    : [];
+
+  if (shouldResetFinanceIntegrity && state.financeTransactions.length > 0) {
+    state.financeTransactions = state.financeTransactions.map((item) => ({
+      ...item,
+      integrityPrevHash: "",
+      integrityHash: "",
+    }));
+  }
+
+  const financeLedgerResult = applyFinanceLedgerIntegrity(state.financeTransactions);
+  if (financeLedgerResult.invalidCount > 0) {
+    const alertKey = financeLedgerResult.invalidTransactionIds.join("|");
+    if (alertKey && alertKey !== lastFinanceIntegrityAlertKey) {
+      appendSystemAuditLog({
+        domain: FINANCE_LOG_DOMAIN,
+        action: "FINANCE_LEDGER_TAMPER_DETECTED",
+        actorId: "system",
+        details: {
+          invalidCount: financeLedgerResult.invalidCount,
+          invalidTransactionIds: financeLedgerResult.invalidTransactionIds,
+        },
+      });
+      lastFinanceIntegrityAlertKey = alertKey;
+    }
+  } else {
+    lastFinanceIntegrityAlertKey = "";
+  }
+
   const visitGroups = new Set(state.visits.map((item) => `${item.customerId}|${monthOf(item.date)}`));
   visitGroups.forEach((groupKey) => {
     const [customerId, targetMonth] = groupKey.split("|");
@@ -321,6 +715,8 @@ function createInitialState() {
     products: [],
     visits: [],
     referrals: [],
+    financeTransactions: [],
+    systemAuditLogs: [],
     users: [],
     pushSubscriptions: [],
   };
@@ -343,6 +739,12 @@ function readStateFromDisk() {
       products: Array.isArray(parsed.products) ? parsed.products : [],
       visits: Array.isArray(parsed.visits) ? parsed.visits : [],
       referrals: Array.isArray(parsed.referrals) ? parsed.referrals : [],
+      financeTransactions: Array.isArray(parsed.financeTransactions) ? parsed.financeTransactions : [],
+      systemAuditLogs: Array.isArray(parsed.systemAuditLogs)
+        ? parsed.systemAuditLogs
+        : Array.isArray(parsed.auditLogs)
+          ? parsed.auditLogs
+          : [],
       users: Array.isArray(parsed.users) ? parsed.users : [],
       pushSubscriptions: Array.isArray(parsed.pushSubscriptions) ? parsed.pushSubscriptions : [],
     };
@@ -545,6 +947,59 @@ function getReferralsForClient(requestUser) {
   return [];
 }
 
+function getValidFinanceTransactions() {
+  return state.financeTransactions.filter((item) => item.integrityValid !== false);
+}
+
+function getFinanceIntegrityStatus() {
+  const invalidTransactions = state.financeTransactions.filter((item) => item.integrityValid === false);
+  return {
+    ok: invalidTransactions.length === 0,
+    invalidCount: invalidTransactions.length,
+    invalidTransactionIds: invalidTransactions.map((item) => item.id),
+  };
+}
+
+function getFinanceTransactionsForClient(requestUser) {
+  if (!hasFeaturePermission(requestUser, "finance")) {
+    return [];
+  }
+
+  const validTransactions = getValidFinanceTransactions();
+
+  if (requestUser.role === "admin") {
+    return validTransactions;
+  }
+
+  return validTransactions.filter((item) => item.userId === requestUser.id);
+}
+
+function getFinanceBalanceForUser(userId) {
+  if (!userId) return 0;
+  return getValidFinanceTransactions().reduce((sum, item) => {
+    if (item.userId !== userId) return sum;
+    if (normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_IN) return sum + item.amount;
+    if (normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_OUT) return sum - item.amount;
+    return sum;
+  }, 0);
+}
+
+function getFinanceAuditLogsForClient(requestUser, options = {}) {
+  assertFeaturePermission(requestUser, "finance");
+
+  const limitRaw = Number(options.limit);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 1000) : 200;
+  const financeLogs = state.systemAuditLogs.filter((item) => item.domain === FINANCE_LOG_DOMAIN);
+
+  if (requestUser.role === "admin") {
+    return financeLogs.slice(0, limit);
+  }
+
+  return financeLogs
+    .filter((item) => item.actorId === requestUser.id || item.walletUserId === requestUser.id)
+    .slice(0, limit);
+}
+
 function getBootstrapForUser(requestUser) {
   const canSeeCustomers =
     hasFeaturePermission(requestUser, "customers") ||
@@ -567,7 +1022,16 @@ function getBootstrapForUser(requestUser) {
         ? clone(state.visits)
         : [],
     referrals: clone(getReferralsForClient(requestUser)),
+    financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
     users: clone(getUsersForClient(requestUser)),
+    financeIntegrity:
+      requestUser.role === "admin"
+        ? clone(getFinanceIntegrityStatus())
+        : {
+            ok: true,
+            invalidCount: 0,
+            invalidTransactionIds: [],
+          },
   };
 }
 
@@ -1041,6 +1505,174 @@ function deleteReferral(requestUser, referralId) {
   };
 }
 
+function addFinanceTransaction(requestUser, input) {
+  assertFeaturePermission(requestUser, "finance");
+
+  const integrityStatus = getFinanceIntegrityStatus();
+  if (!integrityStatus.ok) {
+    throw httpError(
+      409,
+      "Phát hiện dữ liệu tài chính không toàn vẹn. Tạm khóa ghi giao dịch mới để tránh gian lận số liệu.",
+    );
+  }
+
+  const type = normalizeFinanceTransactionType(input?.type);
+  const amount = Number(input?.amount || 0);
+  const transactionDate = typeof input?.transactionDate === "string" ? input.transactionDate.trim() : "";
+  const category = normalizeFinanceExpenseCategory(input?.category);
+  const rawNote = typeof input?.note === "string" ? input.note : "";
+  const requestedUserId = typeof input?.userId === "string" ? input.userId : "";
+  const requestedAdjustmentOf = typeof input?.adjustmentOf === "string" ? input.adjustmentOf.trim() : "";
+  const requestedAdjustmentFlag = Boolean(input?.adjustment || input?.isAdjustment);
+  const receiptInputRaw =
+    input?.receiptImage && typeof input.receiptImage === "object"
+      ? input.receiptImage
+      : {
+          dataUrl:
+            typeof input?.receiptImageDataUrl === "string"
+              ? input.receiptImageDataUrl
+              : typeof input?.receipt_image_data_url === "string"
+                ? input.receipt_image_data_url
+                : "",
+          name:
+            typeof input?.receiptImageName === "string"
+              ? input.receiptImageName
+              : typeof input?.receipt_image_name === "string"
+              ? input.receipt_image_name
+                : "",
+        };
+  let receipt = { receiptImageDataUrl: "", receiptImageName: "" };
+
+  if (type !== FINANCE_TYPE_IN && type !== FINANCE_TYPE_OUT) {
+    throw httpError(400, "Loại giao dịch không hợp lệ. Chỉ chấp nhận NHẬP hoặc XUẤT.");
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw httpError(400, "Số tiền phải lớn hơn 0.");
+  }
+
+  if (transactionDate && !isValidDay(transactionDate)) {
+    throw httpError(400, "Ngày giao dịch không hợp lệ.");
+  }
+
+  let isAdjustment = requestedAdjustmentFlag || Boolean(requestedAdjustmentOf) || isAdjustmentNote(rawNote);
+  let note = normalizeTextValue(rawNote);
+  if (!note) {
+    throw httpError(400, "Vui lòng nhập nội dung mô tả giao dịch.");
+  }
+  if (note.length > 500) {
+    throw httpError(400, "Nội dung mô tả tối đa 500 ký tự.");
+  }
+  if (isAdjustment) {
+    note = normalizeAdjustmentNote(note);
+  }
+
+  let targetUserId = requestUser.id;
+
+  if (requestUser.role === "admin") {
+    if (type !== FINANCE_TYPE_IN) {
+      throw httpError(403, "Quản trị viên chỉ được tạo giao dịch NHẬP.");
+    }
+
+    if (!requestedUserId) {
+      throw httpError(400, "Vui lòng chọn tài khoản thành viên cần ghi nhận ví.");
+    }
+
+    const targetUser = state.users.find((item) => item.id === requestedUserId && item.role === "member");
+    if (!targetUser) {
+      throw httpError(400, "Tài khoản ví không hợp lệ.");
+    }
+
+    targetUserId = targetUser.id;
+  } else {
+    if (type !== FINANCE_TYPE_OUT) {
+      throw httpError(403, "Nhân viên chỉ được tạo giao dịch XUẤT.");
+    }
+
+    if (!FINANCE_EXPENSE_CATEGORIES.has(category)) {
+      throw httpError(400, "Danh mục xuất không hợp lệ. Chỉ chấp nhận Ads, Vận hành hoặc Khác.");
+    }
+
+    if (requestedUserId && requestedUserId !== requestUser.id) {
+      throw httpError(403, "Bạn chỉ được ghi nhận giao dịch cho ví của chính mình.");
+    }
+
+    const currentBalance = getFinanceBalanceForUser(targetUserId);
+    if (amount > currentBalance) {
+      throw httpError(409, "Số tồn hiện tại không đủ để thực hiện giao dịch XUẤT.");
+    }
+  }
+
+  if (type === FINANCE_TYPE_OUT) {
+    receipt = normalizeFinanceReceiptInput(receiptInputRaw);
+  }
+
+  let adjustmentOf = "";
+  if (requestedAdjustmentOf) {
+    const reference = state.financeTransactions.find((item) => item.id === requestedAdjustmentOf);
+    if (!reference || reference.integrityValid === false) {
+      throw httpError(400, "Không tìm thấy giao dịch gốc hợp lệ để điều chỉnh.");
+    }
+    if (reference.userId !== targetUserId) {
+      throw httpError(400, "Giao dịch điều chỉnh phải áp dụng cho cùng một ví nhân viên.");
+    }
+    adjustmentOf = reference.id;
+    isAdjustment = true;
+    note = normalizeAdjustmentNote(note);
+  }
+
+  const createdAt = buildFinanceCreatedAt(transactionDate);
+  if (!createdAt) {
+    throw httpError(400, "Ngày giao dịch không hợp lệ.");
+  }
+  const previousHash = state.financeTransactions[0]?.integrityHash || FINANCE_LEDGER_GENESIS;
+  const transaction = {
+    id: createId("fin"),
+    userId: targetUserId,
+    type,
+    amount,
+    category: type === FINANCE_TYPE_OUT ? category : "",
+    note,
+    isAdjustment,
+    adjustmentOf,
+    receiptImageDataUrl: type === FINANCE_TYPE_OUT ? receipt.receiptImageDataUrl : "",
+    receiptImageName: type === FINANCE_TYPE_OUT ? receipt.receiptImageName : "",
+    createdBy: requestUser.id,
+    created_by: requestUser.id,
+    createdAt,
+    timestamp: createdAt,
+    integrityPrevHash: previousHash,
+    integrityVersion: 1,
+  };
+  transaction.integrityHash = signFinanceLedgerEntry(transaction, previousHash);
+  transaction.integrityValid = true;
+
+  state.financeTransactions.unshift(transaction);
+  appendSystemAuditLog({
+    domain: FINANCE_LOG_DOMAIN,
+    action: "FINANCE_TRANSACTION_CREATED",
+    actorId: requestUser.id,
+    walletUserId: targetUserId,
+    transactionId: transaction.id,
+    createdAt,
+    details: {
+      type,
+      amount,
+      category: transaction.category || "",
+      note,
+      isAdjustment,
+      adjustmentOf: adjustmentOf || "",
+      hasReceiptImage: Boolean(transaction.receiptImageDataUrl),
+    },
+  });
+  persist();
+
+  return {
+    transaction: clone(transaction),
+    financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
+  };
+}
+
 function purgeDataByDateRange(requestUser, input) {
   assertFeaturePermission(requestUser, "dataCleanup");
 
@@ -1302,6 +1934,7 @@ module.exports = {
   addReferral,
   updateReferral,
   deleteReferral,
+  addFinanceTransaction,
   purgeDataByDateRange,
   addVisit,
   updateVisit,
@@ -1314,6 +1947,8 @@ module.exports = {
   deleteMemberAccount,
   resetMemberPassword,
   getBootstrapForUser,
+  getFinanceAuditLogsForClient,
+  getFinanceIntegrityStatus,
   hasFeaturePermission,
   httpError,
   safeUser,

@@ -71,6 +71,7 @@
             <option value="products">Sản phẩm dịch vụ</option>
             <option value="visits">Giao dịch dịch vụ</option>
             <option value="reports">Báo cáo chi tiết</option>
+            <option value="finance">Tài chính</option>
             <option value="maintenance">Quản trị dữ liệu theo khoảng thời gian</option>
             <option value="account">Thay đổi mật khẩu</option>
             <option value="users">Tài khoản thành viên</option>
@@ -83,6 +84,7 @@
           <button class="tab-btn" data-tab="visits" data-feature="visits">Giao dịch dịch vụ</button>
           <button class="tab-btn hidden" data-tab="referrals" data-feature="referrals">Hoa hồng giới thiệu</button>
           <button class="tab-btn" data-tab="reports" data-feature="reports">Báo cáo chi tiết</button>
+          <button class="tab-btn" data-tab="finance" data-feature="finance">Tài chính</button>
           <button class="tab-btn" data-tab="maintenance" data-feature="dataCleanup">Quản trị dữ liệu theo khoảng thời gian</button>
           <button class="tab-btn" data-tab="account" data-feature="changePassword">Thay đổi mật khẩu</button>
           <button class="tab-btn" data-tab="users" data-feature="manageUsers">Tài khoản thành viên</button>
@@ -446,6 +448,167 @@
           </div>
         </section>
 
+        <section class="tab-panel" id="tab-finance">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Tài chính</h2>
+              <p id="finance-role-desc" class="card-desc">
+                Hệ thống ví nội bộ chỉ có 2 loại giao dịch: `NHẬP` (tiền được cấp) và `XUẤT` (tiền đã tiêu). Dữ liệu theo
+                nguyên tắc append-only: chỉ thêm mới, không sửa/xoá.
+              </p>
+              <div id="finance-summary" class="summary-row"></div>
+              <div class="form-actions">
+                <button type="button" id="finance-open-expense-btn" class="primary-btn hidden">Thêm khoản xuất</button>
+              </div>
+              <form id="finance-form" class="form-grid hidden">
+                <label id="finance-user-group">
+                  Tài khoản thành viên
+                  <input
+                    type="text"
+                    id="finance-user"
+                    list="finance-user-options"
+                    placeholder="Chọn thành viên cần cấp/điều chỉnh ví"
+                  />
+                  <datalist id="finance-user-options"></datalist>
+                </label>
+                <label id="finance-type-group">
+                  Loại giao dịch
+                  <select id="finance-type" required>
+                    <option value="NHAP">NHẬP</option>
+                    <option value="XUAT">XUẤT</option>
+                  </select>
+                </label>
+                <label>
+                  Số tiền (Việt Nam đồng)
+                  <input type="text" inputmode="decimal" id="finance-amount" required placeholder="Ví dụ: 500000" />
+                </label>
+                <label>
+                  Ngày giao dịch (tuỳ chọn)
+                  <input type="date" id="finance-date" />
+                  <small class="card-desc">Để trống để ghi nhận theo thời gian realtime hiện tại.</small>
+                </label>
+                <label id="finance-category-group">
+                  Danh mục xuất
+                  <select id="finance-category">
+                    <option value="ADS">Ads</option>
+                    <option value="OPERATIONS">Vận hành</option>
+                    <option value="OTHER">Khác</option>
+                  </select>
+                </label>
+                <label>
+                  Ghi chú
+                  <textarea
+                    id="finance-note"
+                    rows="3"
+                    placeholder="Bắt buộc: mô tả giao dịch (nếu điều chỉnh, ghi rõ 'điều chỉnh')."
+                  ></textarea>
+                </label>
+                <label id="finance-receipt-group">
+                  Ảnh hóa đơn (tuỳ chọn)
+                  <input type="file" id="finance-receipt" accept="image/*" />
+                  <small id="finance-receipt-preview" class="card-desc">Chưa đính kèm ảnh hóa đơn.</small>
+                </label>
+                <div class="form-actions">
+                  <button type="submit" id="finance-submit-btn" class="primary-btn">Lưu giao dịch tài chính</button>
+                  <button type="button" id="finance-cancel-btn" class="secondary-btn hidden">Huỷ</button>
+                </div>
+              </form>
+              <div id="finance-result" class="result-box"></div>
+            </article>
+
+            <article id="finance-admin-staff-panel" class="card">
+              <h2>Danh sách nhân viên</h2>
+              <p class="card-desc">
+                Mỗi nhân viên hiển thị tổng đã nhập, đã xuất và số tồn hiện tại. Bấm “Xem lịch sử” hoặc click dòng để xem chi tiết.
+              </p>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nhân viên</th>
+                      <th>Đã nhập</th>
+                      <th>Đã xuất</th>
+                      <th>Tồn</th>
+                      <th>Lịch sử</th>
+                    </tr>
+                  </thead>
+                  <tbody id="finance-staff-body"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article id="finance-admin-report-panel" class="card">
+              <h2 id="finance-report-title">Báo cáo realtime</h2>
+              <p id="finance-report-desc" class="card-desc">
+                Lọc theo nhân viên và khoảng thời gian, sau đó xem tổng hợp theo ngày/tuần/tháng.
+              </p>
+              <div class="form-grid finance-report-filters">
+                <label id="finance-report-user-group">
+                  Nhân viên
+                  <select id="finance-report-user">
+                    <option value="">Tất cả nhân viên</option>
+                  </select>
+                </label>
+                <label>
+                  Từ ngày
+                  <input type="date" id="finance-report-from" />
+                </label>
+                <label>
+                  Đến ngày
+                  <input type="date" id="finance-report-to" />
+                </label>
+                <label>
+                  Thống kê theo
+                  <select id="finance-report-group">
+                    <option value="day">Ngày</option>
+                    <option value="week">Tuần</option>
+                    <option value="month">Tháng</option>
+                  </select>
+                </label>
+              </div>
+              <div id="finance-report-summary" class="summary-row"></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Chu kỳ</th>
+                      <th>Tổng nhập</th>
+                      <th>Tổng xuất</th>
+                      <th>Tổng tồn</th>
+                      <th>Số giao dịch</th>
+                    </tr>
+                  </thead>
+                  <tbody id="finance-report-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="card">
+              <h2 id="finance-history-title">Khoản xuất gần nhất</h2>
+              <div id="finance-balance" class="result-box"></div>
+              <div class="form-grid finance-history-tools">
+                <label>
+                  Tìm theo nội dung
+                  <input type="text" id="finance-search-note" placeholder="Nhập mô tả, danh mục..." />
+                </label>
+                <label>
+                  Tìm theo số tiền
+                  <input type="text" inputmode="decimal" id="finance-search-amount" placeholder="Ví dụ: 200000" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="finance-export-csv-btn" class="secondary-btn">Xuất CSV danh sách hiện tại</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead id="finance-table-head"></thead>
+                  <tbody id="finance-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section class="tab-panel" id="tab-maintenance">
           <div class="panel-grid">
             <article class="card">
@@ -586,6 +749,10 @@
                         <input type="checkbox" id="perm-visits-delete" />
                         Xoá giao dịch dịch vụ
                       </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-finance" />
+                        Tài chính
+                      </label>
                     </section>
 
                     <section class="permission-subgroup">
@@ -661,6 +828,7 @@
                       <th>Giao dịch dịch vụ</th>
                       <th>Sửa giao dịch</th>
                       <th>Xoá giao dịch</th>
+                      <th>Tài chính</th>
                       <th class="hidden">Hoa hồng</th>
                       <th class="hidden">Sửa hoa hồng</th>
                       <th class="hidden">Xoá hoa hồng</th>

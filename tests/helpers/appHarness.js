@@ -469,6 +469,38 @@ function deleteReferral(ctx, referredCustomerName) {
   return textOf(byId(ctx, 'referral-result'));
 }
 
+function addFinanceTransaction(ctx, { type, amount, note = '', targetUsername = '', transactionDate = '' }) {
+  openTab(ctx, 'finance');
+  const openBtn = ctx.document.getElementById('finance-open-expense-btn');
+  if (openBtn && !openBtn.classList.contains('hidden')) {
+    click(openBtn);
+  }
+
+  if (targetUsername) {
+    selectOptionByLabel(
+      byId(ctx, 'finance-user'),
+      (label) => label.includes(`(${targetUsername})`) || label.includes(targetUsername),
+      `Không tìm thấy tài khoản ${targetUsername} trong form tài chính`,
+    );
+  } else {
+    const userInput = byId(ctx, 'finance-user');
+    if (!userInput.disabled) {
+      setValue(userInput, '');
+    }
+  }
+
+  setValue(byId(ctx, 'finance-type'), type);
+  setValue(byId(ctx, 'finance-amount'), String(amount));
+  if (transactionDate) {
+    setValue(byId(ctx, 'finance-date'), transactionDate);
+  } else {
+    setValue(byId(ctx, 'finance-date'), '');
+  }
+  setValue(byId(ctx, 'finance-note'), note);
+  submit(byId(ctx, 'finance-form'));
+  return textOf(byId(ctx, 'finance-result'));
+}
+
 function getDataRows(ctx, tbodyId) {
   const tbody = byId(ctx, tbodyId);
 
@@ -481,6 +513,7 @@ function getRowTexts(ctx, tbodyId) {
 
 module.exports = {
   addReferral,
+  addFinanceTransaction,
   addVisit,
   bootApp,
   byId,

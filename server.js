@@ -16,6 +16,9 @@ const {
   updateProduct,
   deleteProduct,
   addReferral,
+  addFinanceTransaction,
+  getFinanceAuditLogsForClient,
+  getFinanceIntegrityStatus,
   updateReferral,
   deleteReferral,
   addVisit,
@@ -76,13 +79,18 @@ backupManager.start();
 if (!process.env.SESSION_SECRET) {
   console.warn("[AHA] SESSION_SECRET đang dùng mặc định. Hãy đặt SESSION_SECRET mạnh trước khi triển khai.");
 }
+if (!process.env.AHA_FINANCE_LEDGER_SECRET) {
+  console.warn(
+    "[AHA] AHA_FINANCE_LEDGER_SECRET chưa được cấu hình. Hãy đặt secret riêng để tăng an toàn chống sửa số liệu tài chính.",
+  );
+}
 
 app.use(
   helmet({
     contentSecurityPolicy: false,
   }),
 );
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "6mb" }));
 app.use(cookieParser());
 app.use(morgan("tiny"));
 app.use("/icons", express.static(path.join(ROOT_DIR, "icons"), { maxAge: "7d" }));
@@ -349,6 +357,50 @@ app.delete("/api/referrals/:id", requireAuth, (req, res) => {
   } catch (error) {
     sendApiError(res, error, "Không thể xoá giao dịch hoa hồng giới thiệu.");
   }
+});
+
+app.post("/api/finance/transactions", requireAuth, (req, res) => {
+  try {
+    const payload = addFinanceTransaction(req.user, req.body);
+    res.status(201).json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể ghi nhận giao dịch tài chính.");
+  }
+});
+
+app.get("/api/finance/logs", requireAuth, (req, res) => {
+  try {
+    const limit = Number(req.query?.limit || 200);
+    const logs = getFinanceAuditLogsForClient(req.user, { limit });
+    res.json({ logs });
+  } catch (error) {
+    sendApiError(res, error, "Không thể đọc nhật ký giao dịch tài chính.");
+  }
+});
+
+app.get("/api/finance/integrity", requireAuth, (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      res.status(403).json({ message: "Chỉ quản trị viên được xem trạng thái toàn vẹn dữ liệu tài chính." });
+      return;
+    }
+
+    res.json({ integrity: getFinanceIntegrityStatus() });
+  } catch (error) {
+    sendApiError(res, error, "Không thể đọc trạng thái toàn vẹn dữ liệu tài chính.");
+  }
+});
+
+app.patch("/api/finance/transactions/:id", requireAuth, (_req, res) => {
+  res.status(405).json({
+    message: "Giao dịch tài chính là append-only. Không cho phép sửa giao dịch, hãy tạo giao dịch điều chỉnh.",
+  });
+});
+
+app.delete("/api/finance/transactions/:id", requireAuth, (_req, res) => {
+  res.status(405).json({
+    message: "Giao dịch tài chính là append-only. Không cho phép xoá giao dịch.",
+  });
 });
 
 app.post("/api/data-cleanup/range", requireAuth, (req, res) => {
