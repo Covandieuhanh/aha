@@ -1,9 +1,11 @@
 const STORAGE_KEY = "aha-crm-v1";
 const SESSION_KEY = "aha-crm-session-v1";
+const LOCAL_SEED_APPLIED_KEY = "aha-crm-local-seed-applied-v1";
 const DEFAULT_ADMIN_USERNAME = "admin";
 const DEFAULT_ADMIN_PASSWORD = "admin123";
 const AUTO_SYNC_INTERVAL_MS = 5000;
 const MAX_FINANCE_RECEIPT_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_FINANCE_SUBCATEGORY_LENGTH = 80;
 const DEFAULT_FINANCE_EXPENSE_CATEGORIES = [
   { code: "ADS", name: "Ads", active: true },
   { code: "OPERATIONS", name: "Vận hành", active: true },
@@ -11,6 +13,10 @@ const DEFAULT_FINANCE_EXPENSE_CATEGORIES = [
 ];
 const FINANCE_TYPE_IN = "NHAP";
 const FINANCE_TYPE_OUT = "XUAT";
+const INVENTORY_AREA_WAREHOUSE = "KHO";
+const INVENTORY_AREA_SPA = "SPA";
+const INVENTORY_TYPE_IN = "NHAP";
+const INVENTORY_TYPE_OUT = "XUAT";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -66,12 +72,26 @@ const TAB_FEATURE_MAP = {
   referrals: "referrals",
   reports: "reports",
   finance: "finance",
+  inventory: "inventory",
   maintenance: "dataCleanup",
   account: "changePassword",
   users: "manageUsers",
 };
 
 const SUPPRESSED_TABS = new Set(["referrals"]);
+const TAB_GROUPS = [
+  { id: "data", tabs: ["customers", "products", "maintenance"] },
+  { id: "transactions", tabs: ["visits", "reports"] },
+  { id: "finance", tabs: ["finance"] },
+  { id: "inventory", tabs: ["inventory"] },
+  { id: "accounts", tabs: ["users", "account"] },
+];
+const TAB_GROUP_BY_TAB = TAB_GROUPS.reduce((acc, group) => {
+  group.tabs.forEach((tabId) => {
+    acc[tabId] = group.id;
+  });
+  return acc;
+}, {});
 
 const MEMBER_PERMISSION_KEYS = [
   "customers",
@@ -85,6 +105,11 @@ const MEMBER_PERMISSION_KEYS = [
   "referrals",
   "referralsEdit",
   "referralsDelete",
+  "inventory",
+  "inventoryWarehouseIn",
+  "inventoryWarehouseOut",
+  "inventorySpaIn",
+  "inventorySpaOut",
   "finance",
   "financeFund",
   "dataCleanup",
@@ -99,6 +124,8 @@ const state = {
   products: [],
   visits: [],
   referrals: [],
+  inventoryTransactions: [],
+  inventoryViewArea: INVENTORY_AREA_WAREHOUSE,
   financeTransactions: [],
   financeExpenseCategories: [],
   financeCategoryReclassLogs: [],
@@ -110,13 +137,17 @@ const state = {
   editingReferralId: null,
   financeSelectedUserId: "",
   financeExpenseFormOpen: false,
+  inventoryInlineEditTransactionId: "",
   financeEditingTransactionId: "",
+  financeInlineActionTransactionId: "",
+  financeInlineActionMode: "",
   financeCategoryEditingCode: "",
   financeReclassTargetTransactionId: "",
   financeHistoryLimit: 10,
   financePendingReceipt: null,
   financeVisibleRows: [],
   activeTab: "",
+  activeTabGroup: "",
   pushPermission: "default",
 };
 
@@ -136,6 +167,7 @@ const refs = {
   pushHint: document.getElementById("push-hint"),
 
   tabs: document.querySelectorAll(".tab-btn"),
+  tabGroupButtons: document.querySelectorAll(".tab-group-btn"),
   tabSelector: document.getElementById("tab-selector"),
   panels: document.querySelectorAll(".tab-panel"),
 
@@ -211,6 +243,32 @@ const refs = {
   reportCustomerSearchOptions: document.getElementById("report-customer-search-options"),
   reportCustomerHistoryBody: document.getElementById("report-customer-history-body"),
 
+  inventoryForm: document.getElementById("inventory-form"),
+  inventoryViewWarehouseBtn: document.getElementById("inventory-view-warehouse-btn"),
+  inventoryViewSpaBtn: document.getElementById("inventory-view-spa-btn"),
+  inventoryViewDesc: document.getElementById("inventory-view-desc"),
+  inventoryArea: document.getElementById("inventory-area"),
+  inventoryType: document.getElementById("inventory-type"),
+  inventoryItemName: document.getElementById("inventory-item-name"),
+  inventoryItemOptions: document.getElementById("inventory-item-options"),
+  inventoryQuantity: document.getElementById("inventory-quantity"),
+  inventoryDate: document.getElementById("inventory-date"),
+  inventoryNote: document.getElementById("inventory-note"),
+  inventoryTransferWrap: document.getElementById("inventory-transfer-wrap"),
+  inventoryTransferTargetArea: document.getElementById("inventory-transfer-target-area"),
+  inventorySubmitBtn: document.getElementById("inventory-submit-btn"),
+  inventoryResult: document.getElementById("inventory-result"),
+  inventoryStockTitle: document.getElementById("inventory-stock-title"),
+  inventoryHistoryTitle: document.getElementById("inventory-history-title"),
+  inventorySummary: document.getElementById("inventory-summary"),
+  inventoryFilterArea: document.getElementById("inventory-filter-area"),
+  inventorySearch: document.getElementById("inventory-search"),
+  inventoryStockWarehouseWrap: document.getElementById("inventory-stock-warehouse-wrap"),
+  inventoryStockSpaWrap: document.getElementById("inventory-stock-spa-wrap"),
+  inventoryStockWarehouseBody: document.getElementById("inventory-stock-warehouse-body"),
+  inventoryStockSpaBody: document.getElementById("inventory-stock-spa-body"),
+  inventoryTableBody: document.getElementById("inventory-table-body"),
+
   financeForm: document.getElementById("finance-form"),
   financeRoleDesc: document.getElementById("finance-role-desc"),
   financeOpenExpenseBtn: document.getElementById("finance-open-expense-btn"),
@@ -225,6 +283,7 @@ const refs = {
   financeDate: document.getElementById("finance-date"),
   financeCategoryGroup: document.getElementById("finance-category-group"),
   financeCategory: document.getElementById("finance-category"),
+  financeSubCategory: document.getElementById("finance-subcategory"),
   financeNote: document.getElementById("finance-note"),
   financeReceiptGroup: document.getElementById("finance-receipt-group"),
   financeReceipt: document.getElementById("finance-receipt"),
@@ -300,6 +359,11 @@ const refs = {
   permVisitsDelete: document.getElementById("perm-visits-delete"),
   permFinance: document.getElementById("perm-finance"),
   permFinanceFund: document.getElementById("perm-finance-fund"),
+  permInventory: document.getElementById("perm-inventory"),
+  permInventoryWarehouseIn: document.getElementById("perm-inventory-warehouse-in"),
+  permInventoryWarehouseOut: document.getElementById("perm-inventory-warehouse-out"),
+  permInventorySpaIn: document.getElementById("perm-inventory-spa-in"),
+  permInventorySpaOut: document.getElementById("perm-inventory-spa-out"),
   permReferrals: document.getElementById("perm-referrals"),
   permReferralsEdit: document.getElementById("perm-referrals-edit"),
   permReferralsDelete: document.getElementById("perm-referrals-delete"),
@@ -350,6 +414,14 @@ function bindEvents() {
       const tabId = btn.dataset.tab;
       if (!canAccessTab(tabId)) return;
       setActiveTab(tabId);
+    });
+  });
+
+  refs.tabGroupButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const groupId = String(btn.dataset.tabGroup || "");
+      if (!groupId) return;
+      setActiveTabGroup(groupId);
     });
   });
 
@@ -411,6 +483,63 @@ function bindEvents() {
   refs.referralCancelBtn.addEventListener("click", handleCancelReferralEdit);
   refs.referralTableBody.addEventListener("click", handleReferralTableClick);
 
+  if (refs.inventoryForm) {
+    refs.inventoryForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      addInventoryTransaction();
+    });
+  }
+  if (refs.inventoryViewWarehouseBtn) {
+    refs.inventoryViewWarehouseBtn.addEventListener("click", () => {
+      setInventoryViewArea(INVENTORY_AREA_WAREHOUSE);
+    });
+  }
+  if (refs.inventoryViewSpaBtn) {
+    refs.inventoryViewSpaBtn.addEventListener("click", () => {
+      setInventoryViewArea(INVENTORY_AREA_SPA);
+    });
+  }
+  if (refs.inventoryItemName) refs.inventoryItemName.addEventListener("input", renderInventoryItemOptions);
+  if (refs.inventoryArea) {
+    refs.inventoryArea.addEventListener("change", () => {
+      setInventoryViewArea(refs.inventoryArea.value);
+    });
+  }
+  if (refs.inventoryType) refs.inventoryType.addEventListener("change", renderInventory);
+  if (refs.inventoryTransferTargetArea) refs.inventoryTransferTargetArea.addEventListener("change", renderInventory);
+  if (refs.inventoryFilterArea) {
+    refs.inventoryFilterArea.addEventListener("change", () => {
+      const area = normalizeInventoryArea(refs.inventoryFilterArea.value);
+      if (area) {
+        setInventoryViewArea(area);
+      } else {
+        renderInventory();
+      }
+    });
+  }
+  if (refs.inventorySearch) refs.inventorySearch.addEventListener("input", renderInventory);
+  if (refs.inventoryTableBody) {
+    refs.inventoryTableBody.addEventListener("click", (event) => {
+      const editBtn = event.target.closest(".inventory-edit-btn");
+      if (editBtn) {
+        openInventoryInlineEdit((editBtn.dataset.transactionId || "").trim());
+        return;
+      }
+
+      const saveBtn = event.target.closest(".inventory-inline-save-btn");
+      if (saveBtn) {
+        void submitInventoryInlineEdit((saveBtn.dataset.transactionId || "").trim());
+        return;
+      }
+
+      const cancelBtn = event.target.closest(".inventory-inline-cancel-btn");
+      if (cancelBtn) {
+        resetInventoryInlineEdit();
+        renderInventory();
+      }
+    });
+  }
+
   if (refs.financeForm) {
     refs.financeForm.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -419,6 +548,7 @@ function bindEvents() {
   }
   if (refs.financeOpenExpenseBtn) {
     refs.financeOpenExpenseBtn.addEventListener("click", () => {
+      resetFinanceInlineAction();
       state.financeExpenseFormOpen = true;
       renderFinance();
       if (refs.financeAmount) refs.financeAmount.focus();
@@ -427,6 +557,7 @@ function bindEvents() {
   if (refs.financeCancelBtn) {
     refs.financeCancelBtn.addEventListener("click", () => {
       resetFinanceTransactionEditState();
+      resetFinanceInlineAction();
       state.financeExpenseFormOpen = false;
       if (refs.financeForm) refs.financeForm.classList.add("hidden");
       if (refs.financeUser && refs.financeUser.disabled) refs.financeUser.value = "";
@@ -451,12 +582,14 @@ function bindEvents() {
   if (refs.financeSearchNote) {
     refs.financeSearchNote.addEventListener("input", () => {
       resetFinanceHistoryLimit();
+      resetFinanceInlineAction();
       renderFinance();
     });
   }
   if (refs.financeSearchAmount) {
     refs.financeSearchAmount.addEventListener("input", () => {
       resetFinanceHistoryLimit();
+      resetFinanceInlineAction();
       renderFinance();
     });
   }
@@ -482,6 +615,7 @@ function bindEvents() {
       const userId = (button?.dataset.userId || row?.dataset.userId || "").trim();
       if (!userId) return;
       resetFinanceHistoryLimit();
+      resetFinanceInlineAction();
       state.financeSelectedUserId = userId;
       renderFinance();
     });
@@ -524,7 +658,7 @@ function bindEvents() {
     refs.financeTableBody.addEventListener("click", (event) => {
       const editBtn = event.target.closest(".finance-edit-transaction-btn");
       if (editBtn) {
-        startFinanceTransactionEdit((editBtn.dataset.transactionId || "").trim());
+        openFinanceInlineAction((editBtn.dataset.transactionId || "").trim(), "edit");
         return;
       }
 
@@ -534,14 +668,18 @@ function bindEvents() {
         return;
       }
 
-      const reclassBtn = event.target.closest(".finance-reclass-open-btn");
-      if (!reclassBtn) return;
-      const transactionId = (reclassBtn.dataset.transactionId || "").trim();
-      if (!transactionId) return;
-      state.financeReclassTargetTransactionId = transactionId;
-      if (refs.financeReclassReason) refs.financeReclassReason.value = "";
-      if (refs.financeReclassResult) refs.financeReclassResult.textContent = "";
-      renderFinance();
+      const saveInlineEditBtn = event.target.closest(".finance-inline-save-edit-btn");
+      if (saveInlineEditBtn) {
+        void submitFinanceInlineEdit((saveInlineEditBtn.dataset.transactionId || "").trim());
+        return;
+      }
+
+      const cancelInlineBtn = event.target.closest(".finance-inline-cancel-btn");
+      if (cancelInlineBtn) {
+        resetFinanceInlineAction();
+        renderFinance();
+        return;
+      }
     });
   }
   if (refs.financeReclassSubmitBtn) {
@@ -594,6 +732,7 @@ function bindEvents() {
   refs.permVisits.addEventListener("change", syncMemberCreateServicePermissions);
   refs.permVisitsEdit.addEventListener("change", syncMemberCreateServicePermissions);
   refs.permVisitsDelete.addEventListener("change", syncMemberCreateServicePermissions);
+  if (refs.permInventory) refs.permInventory.addEventListener("change", syncMemberCreateInventoryPermissions);
 
   if (refs.modalOkBtn) {
     refs.modalOkBtn.addEventListener("click", hideModal);
@@ -620,6 +759,7 @@ function setDefaultDates() {
   refs.visitMonthFilter.value = thisMonth;
   refs.referralMonthFilter.value = thisMonth;
   refs.reportMonthFilter.value = thisMonth;
+  if (refs.inventoryDate) refs.inventoryDate.value = today;
   if (refs.financeDate) refs.financeDate.value = "";
   if (refs.financeReportFrom) refs.financeReportFrom.value = `${thisMonth}-01`;
   if (refs.financeReportTo) refs.financeReportTo.value = today;
@@ -637,6 +777,11 @@ function setDefaultMemberPermissionInputs() {
   refs.permVisitsDelete.checked = false;
   refs.permFinance.checked = false;
   refs.permFinanceFund.checked = false;
+  if (refs.permInventory) refs.permInventory.checked = false;
+  if (refs.permInventoryWarehouseIn) refs.permInventoryWarehouseIn.checked = false;
+  if (refs.permInventoryWarehouseOut) refs.permInventoryWarehouseOut.checked = false;
+  if (refs.permInventorySpaIn) refs.permInventorySpaIn.checked = false;
+  if (refs.permInventorySpaOut) refs.permInventorySpaOut.checked = false;
   refs.permReferrals.checked = false;
   refs.permReferralsEdit.checked = false;
   refs.permReferralsDelete.checked = false;
@@ -646,6 +791,7 @@ function setDefaultMemberPermissionInputs() {
   refs.permReports.checked = true;
   refs.permReportsAll.checked = false;
   syncMemberCreateServicePermissions();
+  syncMemberCreateInventoryPermissions();
 }
 
 function renderRuntimeMode() {
@@ -766,22 +912,45 @@ async function handlePushButton() {
 function loadState() {
   if (runtime.remoteMode) return;
 
+  let loadedFromStorage = false;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-
-    const parsed = JSON.parse(raw);
-    state.customers = Array.isArray(parsed.customers) ? parsed.customers : [];
-    state.products = Array.isArray(parsed.products) ? parsed.products : [];
-    state.visits = Array.isArray(parsed.visits) ? parsed.visits : [];
-    state.referrals = Array.isArray(parsed.referrals) ? parsed.referrals : [];
-    state.financeTransactions = Array.isArray(parsed.financeTransactions) ? parsed.financeTransactions : [];
-    state.financeExpenseCategories = Array.isArray(parsed.financeExpenseCategories) ? parsed.financeExpenseCategories : [];
-    state.financeCategoryReclassLogs = Array.isArray(parsed.financeCategoryReclassLogs) ? parsed.financeCategoryReclassLogs : [];
-    state.users = Array.isArray(parsed.users) ? parsed.users.map(normalizeUser) : [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      state.customers = Array.isArray(parsed.customers) ? parsed.customers : [];
+      state.products = Array.isArray(parsed.products) ? parsed.products : [];
+      state.visits = Array.isArray(parsed.visits) ? parsed.visits : [];
+      state.referrals = Array.isArray(parsed.referrals) ? parsed.referrals : [];
+      state.inventoryTransactions = Array.isArray(parsed.inventoryTransactions) ? parsed.inventoryTransactions : [];
+      state.financeTransactions = Array.isArray(parsed.financeTransactions) ? parsed.financeTransactions : [];
+      state.financeExpenseCategories = Array.isArray(parsed.financeExpenseCategories) ? parsed.financeExpenseCategories : [];
+      state.financeCategoryReclassLogs = Array.isArray(parsed.financeCategoryReclassLogs) ? parsed.financeCategoryReclassLogs : [];
+      state.users = Array.isArray(parsed.users) ? parsed.users.map(normalizeUser) : [];
+      loadedFromStorage = true;
+    }
   } catch (error) {
     console.warn("Không đọc được dữ liệu cũ:", error);
   }
+
+  const seedApplied = localStorage.getItem(LOCAL_SEED_APPLIED_KEY) === "1";
+  if (seedApplied) return;
+  if (loadedFromStorage && state.inventoryTransactions.length > 0) {
+    localStorage.setItem(LOCAL_SEED_APPLIED_KEY, "1");
+    return;
+  }
+  if (!applyLocalSeedState()) return;
+  localStorage.setItem(LOCAL_SEED_APPLIED_KEY, "1");
+}
+
+function applyLocalSeedState() {
+  if (typeof window === "undefined") return false;
+  const seed = window.__AHA_LOCAL_SEED__;
+  if (!seed || typeof seed !== "object") return false;
+  const inventorySeed = Array.isArray(seed.inventoryTransactions) ? seed.inventoryTransactions : [];
+  if (!inventorySeed.length) return false;
+
+  state.inventoryTransactions = inventorySeed;
+  return true;
 }
 
 function saveState() {
@@ -794,6 +963,7 @@ function saveState() {
       products: state.products,
       visits: state.visits,
       referrals: state.referrals,
+      inventoryTransactions: state.inventoryTransactions,
       financeTransactions: state.financeTransactions,
       financeExpenseCategories: state.financeExpenseCategories,
       financeCategoryReclassLogs: state.financeCategoryReclassLogs,
@@ -841,6 +1011,11 @@ function getDefaultMemberPermissions() {
     referrals: false,
     referralsEdit: false,
     referralsDelete: false,
+    inventory: false,
+    inventoryWarehouseIn: false,
+    inventoryWarehouseOut: false,
+    inventorySpaIn: false,
+    inventorySpaOut: false,
     finance: false,
     financeFund: false,
     dataCleanup: false,
@@ -867,6 +1042,11 @@ function buildMemberPermissions(rawPermissions) {
     referrals: Boolean(source.referrals ?? defaults.referrals),
     referralsEdit: Boolean(source.referralsEdit ?? defaults.referralsEdit),
     referralsDelete: Boolean(source.referralsDelete ?? defaults.referralsDelete),
+    inventory: Boolean(source.inventory ?? defaults.inventory),
+    inventoryWarehouseIn: Boolean(source.inventoryWarehouseIn ?? defaults.inventoryWarehouseIn),
+    inventoryWarehouseOut: Boolean(source.inventoryWarehouseOut ?? defaults.inventoryWarehouseOut),
+    inventorySpaIn: Boolean(source.inventorySpaIn ?? defaults.inventorySpaIn),
+    inventorySpaOut: Boolean(source.inventorySpaOut ?? defaults.inventorySpaOut),
     finance: Boolean(source.finance ?? defaults.finance),
     financeFund: Boolean(source.financeFund ?? defaults.financeFund),
     dataCleanup: Boolean(source.dataCleanup ?? defaults.dataCleanup),
@@ -909,6 +1089,11 @@ function normalizeUser(user) {
             referrals: true,
             referralsEdit: true,
             referralsDelete: true,
+            inventory: true,
+            inventoryWarehouseIn: true,
+            inventoryWarehouseOut: true,
+            inventorySpaIn: true,
+            inventorySpaOut: true,
             finance: true,
             financeFund: true,
             dataCleanup: true,
@@ -946,6 +1131,11 @@ function ensureAdminAccount() {
         referrals: true,
         referralsEdit: true,
         referralsDelete: true,
+        inventory: true,
+        inventoryWarehouseIn: true,
+        inventoryWarehouseOut: true,
+        inventorySpaIn: true,
+        inventorySpaOut: true,
         finance: true,
         financeFund: true,
         dataCleanup: true,
@@ -974,6 +1164,11 @@ function ensureAdminAccount() {
         referrals: true,
         referralsEdit: true,
         referralsDelete: true,
+        inventory: true,
+        inventoryWarehouseIn: true,
+        inventoryWarehouseOut: true,
+        inventorySpaIn: true,
+        inventorySpaOut: true,
         finance: true,
         financeFund: true,
         dataCleanup: true,
@@ -992,6 +1187,7 @@ function clearState() {
   state.products = [];
   state.visits = [];
   state.referrals = [];
+  state.inventoryTransactions = [];
   state.financeTransactions = [];
   state.financeExpenseCategories = [];
   state.financeCategoryReclassLogs = [];
@@ -1003,7 +1199,10 @@ function clearState() {
   state.editingReferralId = null;
   state.financeSelectedUserId = "";
   state.financeExpenseFormOpen = false;
+  state.inventoryInlineEditTransactionId = "";
   state.financeEditingTransactionId = "";
+  state.financeInlineActionTransactionId = "";
+  state.financeInlineActionMode = "";
   state.financeCategoryEditingCode = "";
   state.financeReclassTargetTransactionId = "";
   state.financeHistoryLimit = 10;
@@ -1016,6 +1215,7 @@ function normalizeStateCollections() {
   state.products = Array.isArray(state.products) ? state.products : [];
   state.visits = Array.isArray(state.visits) ? state.visits : [];
   state.referrals = Array.isArray(state.referrals) ? state.referrals : [];
+  state.inventoryTransactions = Array.isArray(state.inventoryTransactions) ? state.inventoryTransactions : [];
   state.financeTransactions = Array.isArray(state.financeTransactions) ? state.financeTransactions : [];
   state.financeExpenseCategories = Array.isArray(state.financeExpenseCategories) ? state.financeExpenseCategories : [];
   state.financeCategoryReclassLogs = Array.isArray(state.financeCategoryReclassLogs) ? state.financeCategoryReclassLogs : [];
@@ -1028,6 +1228,7 @@ function applyBootstrap(payload) {
   state.products = Array.isArray(payload?.products) ? payload.products : [];
   state.visits = Array.isArray(payload?.visits) ? payload.visits : [];
   state.referrals = Array.isArray(payload?.referrals) ? payload.referrals : [];
+  state.inventoryTransactions = Array.isArray(payload?.inventoryTransactions) ? payload.inventoryTransactions : [];
   state.financeTransactions = Array.isArray(payload?.financeTransactions) ? payload.financeTransactions : [];
   state.financeExpenseCategories = Array.isArray(payload?.financeExpenseCategories) ? payload.financeExpenseCategories : [];
   state.financeCategoryReclassLogs = Array.isArray(payload?.financeCategoryReclassLogs)
@@ -1588,6 +1789,33 @@ function canGrantFinanceToMembers(user) {
   return Boolean(user.permissions?.financeFund);
 }
 
+function canMutateInventoryByAreaAndType(user, area, type) {
+  if (!user) return false;
+  if (isAdmin(user)) return true;
+  if (!hasFeaturePermission(user, "inventory")) return false;
+
+  if (area === INVENTORY_AREA_WAREHOUSE && type === INVENTORY_TYPE_IN) {
+    return Boolean(user.permissions?.inventoryWarehouseIn);
+  }
+  if (area === INVENTORY_AREA_WAREHOUSE && type === INVENTORY_TYPE_OUT) {
+    return Boolean(user.permissions?.inventoryWarehouseOut);
+  }
+  if (area === INVENTORY_AREA_SPA && type === INVENTORY_TYPE_IN) {
+    return Boolean(user.permissions?.inventorySpaIn);
+  }
+  if (area === INVENTORY_AREA_SPA && type === INVENTORY_TYPE_OUT) {
+    return Boolean(user.permissions?.inventorySpaOut);
+  }
+
+  return false;
+}
+
+function getInventoryPermissionMessage(area, type) {
+  const areaLabel = area === INVENTORY_AREA_SPA ? "spa" : "kho";
+  const typeLabel = type === INVENTORY_TYPE_OUT ? "xuất" : "nhập";
+  return `Bạn chưa được cấp quyền ${typeLabel} ${areaLabel}.`;
+}
+
 function isMemberWalletUserId(userId) {
   if (!userId) return false;
   const user = state.users.find((item) => item.id === userId);
@@ -1607,6 +1835,36 @@ function getAdminEditableFinanceTransaction(transactionId) {
   if (!transaction) return null;
   if (!isMemberWalletUserId(transaction.userId)) return null;
   return transaction;
+}
+
+function resetFinanceInlineAction() {
+  state.financeInlineActionTransactionId = "";
+  state.financeInlineActionMode = "";
+}
+
+function openFinanceInlineAction(transactionId, mode = "edit") {
+  const normalizedMode = mode === "edit" ? "edit" : "";
+  const transaction = getAdminEditableFinanceTransaction(transactionId);
+  if (!transaction || !normalizedMode) {
+    if (refs.financeResult) refs.financeResult.textContent = "Không thể thao tác giao dịch này.";
+    return;
+  }
+
+  if (
+    state.financeInlineActionTransactionId === transaction.id &&
+    state.financeInlineActionMode === normalizedMode
+  ) {
+    resetFinanceInlineAction();
+    renderFinance();
+    return;
+  }
+
+  // Ưu tiên thao tác trực tiếp trên dòng lịch sử, không dùng form chỉnh sửa phía trên.
+  resetFinanceTransactionEditState({ clearInputs: false });
+  resetFinanceReclassTarget();
+  state.financeInlineActionTransactionId = transaction.id;
+  state.financeInlineActionMode = normalizedMode;
+  renderFinance();
 }
 
 function hasFeaturePermission(user, featureKey) {
@@ -1633,6 +1891,22 @@ function canAccessTab(tabId) {
   if (!featureKey) return false;
 
   return hasFeaturePermission(getCurrentUser(), featureKey);
+}
+
+function getTabGroupId(tabId) {
+  return TAB_GROUP_BY_TAB[tabId] || "";
+}
+
+function getVisibleTabsForUser(user) {
+  const allowedTabs = Object.keys(TAB_FEATURE_MAP).filter((tabId) =>
+    hasFeaturePermission(user, TAB_FEATURE_MAP[tabId]),
+  );
+  return allowedTabs.filter((tabId) => !SUPPRESSED_TABS.has(tabId));
+}
+
+function getVisibleGroupsForTabs(visibleTabs) {
+  const visibleSet = new Set(visibleTabs.map((tabId) => getTabGroupId(tabId)).filter(Boolean));
+  return TAB_GROUPS.map((group) => group.id).filter((groupId) => visibleSet.has(groupId));
 }
 
 function ensureFeature(featureKey, errorElement) {
@@ -1662,6 +1936,8 @@ function renderAuthState() {
     state.financeSelectedUserId = "";
     state.financeExpenseFormOpen = false;
     state.financeEditingTransactionId = "";
+    state.financeInlineActionTransactionId = "";
+    state.financeInlineActionMode = "";
     setCustomerFormMode(false);
     setProductFormMode(false);
     setVisitFormMode(false);
@@ -1698,29 +1974,59 @@ function renderAuthState() {
 
 function applyTabPermissions() {
   const user = getCurrentUser();
-  const allowedTabs = Object.keys(TAB_FEATURE_MAP).filter((tabId) =>
-    hasFeaturePermission(user, TAB_FEATURE_MAP[tabId]),
-  );
-  const visibleTabs = allowedTabs.filter((tabId) => !SUPPRESSED_TABS.has(tabId));
+  const visibleTabs = getVisibleTabsForUser(user);
+  const visibleGroups = getVisibleGroupsForTabs(visibleTabs);
 
   refs.tabs.forEach((btn) => {
-    const isAllowed = visibleTabs.includes(btn.dataset.tab);
+    const isAllowed = visibleTabs.includes(btn.dataset.tab || "");
+    btn.classList.toggle("hidden", !isAllowed);
+    if (!isAllowed) {
+      btn.classList.remove("group-hidden");
+    }
+  });
+
+  refs.tabGroupButtons.forEach((btn) => {
+    const groupId = String(btn.dataset.tabGroup || "");
+    const isAllowed = visibleGroups.includes(groupId);
     btn.classList.toggle("hidden", !isAllowed);
   });
 
   if (visibleTabs.length === 0) {
     refs.noPermission.classList.remove("hidden");
+    state.activeTabGroup = "";
     setActiveTab("");
     return;
   }
 
   refs.noPermission.classList.add("hidden");
-  const nextTab = visibleTabs.includes(state.activeTab) ? state.activeTab : visibleTabs[0];
+  const nextGroup = visibleGroups.includes(state.activeTabGroup)
+    ? state.activeTabGroup
+    : visibleTabs.includes(state.activeTab)
+      ? getTabGroupId(state.activeTab)
+      : visibleGroups[0];
+  state.activeTabGroup = nextGroup || "";
+  applySubTabGroupFilter(visibleTabs, state.activeTabGroup);
+
+  const groupTabs = visibleTabs.filter((tabId) => getTabGroupId(tabId) === state.activeTabGroup);
+  const nextTab = groupTabs.includes(state.activeTab) ? state.activeTab : groupTabs[0];
   setActiveTab(nextTab);
 }
 
 function setActiveTab(tabId) {
   state.activeTab = tabId;
+  if (tabId) {
+    const groupId = getTabGroupId(tabId);
+    if (groupId) state.activeTabGroup = groupId;
+  }
+
+  const visibleTabs = getVisibleTabsForUser(getCurrentUser());
+  const visibleGroups = getVisibleGroupsForTabs(visibleTabs);
+  applySubTabGroupFilter(visibleTabs, state.activeTabGroup);
+
+  refs.tabGroupButtons.forEach((btn) => {
+    const groupId = String(btn.dataset.tabGroup || "");
+    btn.classList.toggle("active", Boolean(tabId) && visibleGroups.includes(groupId) && groupId === state.activeTabGroup);
+  });
 
   refs.tabs.forEach((btn) => {
     btn.classList.toggle("active", tabId && btn.dataset.tab === tabId);
@@ -1737,6 +2043,33 @@ function setActiveTab(tabId) {
   if (tabId === "maintenance") {
     void refreshBackupStatus();
   }
+}
+
+function applySubTabGroupFilter(visibleTabs, groupId) {
+  refs.tabs.forEach((btn) => {
+    const tabId = String(btn.dataset.tab || "");
+    const isVisible = visibleTabs.includes(tabId);
+    if (!isVisible) {
+      btn.classList.remove("group-hidden");
+      return;
+    }
+    const tabGroupId = String(btn.dataset.tabGroup || getTabGroupId(tabId));
+    btn.classList.toggle("group-hidden", Boolean(groupId) && tabGroupId !== groupId);
+  });
+}
+
+function setActiveTabGroup(groupId) {
+  const normalizedGroup = String(groupId || "").trim();
+  if (!normalizedGroup) return;
+  const visibleTabs = getVisibleTabsForUser(getCurrentUser());
+  const visibleGroups = getVisibleGroupsForTabs(visibleTabs);
+  if (!visibleGroups.includes(normalizedGroup)) return;
+
+  state.activeTabGroup = normalizedGroup;
+  applySubTabGroupFilter(visibleTabs, state.activeTabGroup);
+  const groupTabs = visibleTabs.filter((tabId) => getTabGroupId(tabId) === state.activeTabGroup);
+  const nextTab = groupTabs.includes(state.activeTab) ? state.activeTab : groupTabs[0];
+  setActiveTab(nextTab || "");
 }
 
 function getRateByOccurrence(occurrence) {
@@ -1911,6 +2244,46 @@ function normalizeFinanceTransactionType(value) {
   return "";
 }
 
+function normalizeInventoryArea(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (normalized === INVENTORY_AREA_WAREHOUSE) return INVENTORY_AREA_WAREHOUSE;
+  if (normalized === INVENTORY_AREA_SPA) return INVENTORY_AREA_SPA;
+  return "";
+}
+
+function normalizeInventoryType(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (normalized === INVENTORY_TYPE_IN) return INVENTORY_TYPE_IN;
+  if (normalized === INVENTORY_TYPE_OUT) return INVENTORY_TYPE_OUT;
+  return "";
+}
+
+function getInventoryViewArea() {
+  return state.inventoryViewArea === INVENTORY_AREA_SPA ? INVENTORY_AREA_SPA : INVENTORY_AREA_WAREHOUSE;
+}
+
+function setInventoryViewArea(area, { triggerRender = true } = {}) {
+  const normalized = normalizeInventoryArea(area) || INVENTORY_AREA_WAREHOUSE;
+  state.inventoryViewArea = normalized;
+  if (refs.inventoryArea && refs.inventoryArea.value !== normalized) {
+    refs.inventoryArea.value = normalized;
+  }
+  if (refs.inventoryFilterArea && refs.inventoryFilterArea.value !== normalized) {
+    refs.inventoryFilterArea.value = normalized;
+  }
+  if (refs.inventoryViewWarehouseBtn) {
+    refs.inventoryViewWarehouseBtn.classList.toggle("active", normalized === INVENTORY_AREA_WAREHOUSE);
+  }
+  if (refs.inventoryViewSpaBtn) {
+    refs.inventoryViewSpaBtn.classList.toggle("active", normalized === INVENTORY_AREA_SPA);
+  }
+  if (triggerRender) renderInventory();
+}
+
 function getFinanceTypeLabel(type) {
   const normalized = normalizeFinanceTransactionType(type);
   if (normalized === FINANCE_TYPE_IN) return "Nhập";
@@ -2020,6 +2393,19 @@ function normalizeFinanceNoteText(note) {
   return String(note || "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeFinanceSubCategory(value) {
+  return normalizeFinanceNoteText(value || "").slice(0, MAX_FINANCE_SUBCATEGORY_LENGTH);
+}
+
+function extractFinanceSubCategoryFromNote(note) {
+  const raw = String(note || "");
+  if (!raw.trim()) return "";
+  const matched =
+    raw.match(/(?:^|\|)\s*hạng\s*mục\s*:\s*([^|\n\r]+)/i) || raw.match(/(?:^|\|)\s*hang\s*muc\s*:\s*([^|\n\r]+)/i);
+  if (!matched) return "";
+  return normalizeFinanceSubCategory(matched[1]);
 }
 
 function isAdjustmentFinanceNote(note) {
@@ -2145,6 +2531,17 @@ function getFinanceExpenseCategoryLabel(value) {
   if (!key) return "-";
   const category = getFinanceExpenseCategoryByCode(key);
   return category?.name || key;
+}
+
+function getFinanceSubCategoryLabel(item) {
+  const raw =
+    typeof item?.subCategory === "string"
+      ? item.subCategory
+      : typeof item?.sub_category === "string"
+        ? item.sub_category
+        : extractFinanceSubCategoryFromNote(item?.note || "");
+  const normalized = normalizeFinanceSubCategory(raw);
+  return normalized || "-";
 }
 
 function normalizeFinanceCategoryReclassLogs(rawLogs) {
@@ -2372,6 +2769,7 @@ function filterFinanceHistoryRows(rows) {
       const searchSource = [
         item.note || "",
         getFinanceEffectiveCategoryLabel(item, latestReclassMap),
+        getFinanceSubCategoryLabel(item),
         getFinanceTypeLabel(item.type),
         getUserDisplayName(item.userId),
         getUserDisplayName(item.createdBy || item.created_by),
@@ -2389,12 +2787,84 @@ function filterFinanceHistoryRows(rows) {
   return filtered.sort(sortFinanceRowsByNewest);
 }
 
+function getFinanceInlineActionTransaction() {
+  if (!state.financeInlineActionTransactionId) return null;
+  const transaction = getAdminEditableFinanceTransaction(state.financeInlineActionTransactionId);
+  if (!transaction) return null;
+  return { transaction };
+}
+
+function setFinanceInlineResultMessage(message) {
+  if (!refs.financeTableBody) return;
+  const resultBox = refs.financeTableBody.querySelector(".finance-inline-result");
+  if (!resultBox) return;
+  resultBox.textContent = message || "";
+}
+
+function getFinanceInlineInput(selector) {
+  if (!refs.financeTableBody) return null;
+  return refs.financeTableBody.querySelector(selector);
+}
+
+function buildFinanceInlineEditRowHtml(item) {
+  const normalizedType = normalizeFinanceTransactionType(item.type);
+  const allowCategory = normalizedType === FINANCE_TYPE_OUT && !item.transferId;
+  const amountValue = formatNumberDisplay(item.amount || 0);
+  const dateValue = getFinanceTransactionDayKey(item) || "";
+  const noteValue = item.note || "";
+  const currentCategoryCode = resolveFinanceExpenseCategoryCode(item.category || "", { allowInactive: false }) || getDefaultFinanceExpenseCategoryCode();
+  const categoryOptionsHtml = getFinanceExpenseCategories()
+    .map(
+      (category) =>
+        `<option value="${escapeHtml(category.code)}" ${category.code === currentCategoryCode ? "selected" : ""}>${escapeHtml(category.name)}</option>`,
+    )
+    .join("");
+
+  return `
+    <tr class="finance-inline-editor-row" data-editor-transaction-id="${escapeHtml(item.id)}">
+      <td colspan="10">
+        <div class="form-grid finance-inline-editor-grid">
+          <label>
+            Số tiền
+            <input type="text" inputmode="decimal" id="finance-inline-edit-amount" value="${escapeHtml(amountValue)}" />
+          </label>
+          <label>
+            Ngày giao dịch
+            <input type="date" id="finance-inline-edit-date" value="${escapeHtml(dateValue)}" />
+          </label>
+          <label class="finance-inline-wide">
+            Nội dung
+            <input type="text" id="finance-inline-edit-note" value="${escapeHtml(noteValue)}" />
+          </label>
+          <label class="finance-inline-wide">
+            Danh mục
+            <select id="finance-inline-edit-category" ${allowCategory ? "" : "disabled"}>${categoryOptionsHtml}</select>
+            ${allowCategory ? "" : '<small class="card-desc">Giao dịch này không áp dụng danh mục.</small>'}
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="finance-inline-save-edit-btn" class="primary-btn table-btn finance-inline-save-edit-btn" data-transaction-id="${escapeHtml(item.id)}">Lưu</button>
+          <button type="button" id="finance-inline-cancel-btn" class="secondary-btn table-btn finance-inline-cancel-btn">Huỷ</button>
+        </div>
+        <div class="result-box finance-inline-result"></div>
+      </td>
+    </tr>
+  `;
+}
+
+function buildFinanceInlineActionRowHtml(item) {
+  const active = getFinanceInlineActionTransaction();
+  if (!active || active.transaction.id !== item.id) return "";
+  return buildFinanceInlineEditRowHtml(item);
+}
+
 function buildFinanceVisibleRowsCsv(rows) {
   const latestReclassMap = getLatestFinanceCategoryReclassMap();
   const header = [
     "created_at",
     "type",
     "category",
+    "sub_category",
     "amount",
     "wallet_user",
     "created_by",
@@ -2408,6 +2878,7 @@ function buildFinanceVisibleRowsCsv(rows) {
       item.createdAt || item.timestamp || "",
       getFinanceTypeLabel(item.type),
       getFinanceEffectiveCategoryLabel(item, latestReclassMap),
+      getFinanceSubCategoryLabel(item),
       Number(item.amount || 0),
       getUserDisplayName(item.userId),
       getUserDisplayName(item.createdBy || item.created_by),
@@ -4041,6 +4512,7 @@ function resetFinanceFormInputs() {
   if (refs.financeAmount) refs.financeAmount.value = "";
   if (refs.financeDate) refs.financeDate.value = "";
   if (refs.financeCategory) refs.financeCategory.value = getDefaultFinanceExpenseCategoryCode();
+  if (refs.financeSubCategory) refs.financeSubCategory.value = "";
   if (refs.financeNote) refs.financeNote.value = "";
   if (refs.financeType) refs.financeType.dataset.touched = "";
   clearFinanceReceiptSelection();
@@ -4085,6 +4557,13 @@ function startFinanceTransactionEdit(transactionId) {
       refs.financeCategory.value = resolved || getDefaultFinanceExpenseCategoryCode();
     } else {
       refs.financeCategory.value = getDefaultFinanceExpenseCategoryCode();
+    }
+  }
+  if (refs.financeSubCategory) {
+    if (normalizedType === FINANCE_TYPE_OUT && !transaction.transferId) {
+      refs.financeSubCategory.value = normalizeFinanceSubCategory(transaction.subCategory || "");
+    } else {
+      refs.financeSubCategory.value = "";
     }
   }
   if (refs.financeUser) {
@@ -4135,12 +4614,14 @@ function readFinanceEditFormValues(transaction) {
   const normalizedType = normalizeFinanceTransactionType(transaction.type);
   const isTransfer = Boolean(transaction.transferId);
   let category = "";
+  let subCategory = "";
   if (normalizedType === FINANCE_TYPE_OUT && !isTransfer) {
     category = resolveFinanceExpenseCategoryCode(refs.financeCategory?.value || "", { allowInactive: false });
     if (!category) {
       if (refs.financeResult) refs.financeResult.textContent = "Danh mục xuất không hợp lệ.";
       return null;
     }
+    subCategory = normalizeFinanceSubCategory(refs.financeSubCategory?.value || "");
   }
 
   return {
@@ -4148,6 +4629,7 @@ function readFinanceEditFormValues(transaction) {
     note,
     transactionDate,
     category,
+    subCategory,
   };
 }
 
@@ -4190,6 +4672,7 @@ function applyFinanceTransactionUpdateLocal(transaction, payload) {
     target.timestamp = nextCreatedAt;
     target.isAdjustment = false;
     target.category = "";
+    target.subCategory = "";
 
     counterpart.amount = payload.amount;
     counterpart.note = payload.note;
@@ -4197,6 +4680,7 @@ function applyFinanceTransactionUpdateLocal(transaction, payload) {
     counterpart.timestamp = nextCreatedAt;
     counterpart.isAdjustment = false;
     counterpart.category = "";
+    counterpart.subCategory = "";
   } else {
     target.amount = payload.amount;
     target.note = payload.note;
@@ -4205,8 +4689,10 @@ function applyFinanceTransactionUpdateLocal(transaction, payload) {
     target.isAdjustment = Boolean(target.adjustmentOf) || isAdjustmentFinanceNote(payload.note);
     if (normalizedType === FINANCE_TYPE_OUT) {
       target.category = payload.category || target.category || getDefaultFinanceExpenseCategoryCode();
+      target.subCategory = normalizeFinanceSubCategory(payload.subCategory || "");
     } else {
       target.category = "";
+      target.subCategory = "";
     }
 
     if (normalizedType === FINANCE_TYPE_OUT && target.category !== previousCategory) {
@@ -4228,6 +4714,9 @@ async function updateFinanceTransactionRemote(transaction, payload) {
   };
   if (payload.category) {
     apiPayload.category = payload.category;
+  }
+  if (typeof payload.subCategory === "string") {
+    apiPayload.subCategory = payload.subCategory;
   }
 
   const response = await apiRequest(`/finance/transactions/${encodeURIComponent(transaction.id)}`, {
@@ -4278,6 +4767,90 @@ async function submitFinanceTransactionEdit() {
     renderFinance();
   } catch (error) {
     handleRemoteActionError(error, refs.financeResult, "Không thể cập nhật giao dịch tài chính.");
+  }
+}
+
+function readFinanceInlineEditValues(transaction) {
+  const amountInput = getFinanceInlineInput("#finance-inline-edit-amount");
+  const dateInput = getFinanceInlineInput("#finance-inline-edit-date");
+  const noteInput = getFinanceInlineInput("#finance-inline-edit-note");
+  const categoryInput = getFinanceInlineInput("#finance-inline-edit-category");
+
+  const amount = unformatNumber(amountInput?.value || "");
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { error: "Số tiền phải lớn hơn 0." };
+  }
+
+  const noteRaw = normalizeFinanceNoteText(noteInput?.value || "");
+  if (!noteRaw) {
+    return { error: "Vui lòng nhập nội dung mô tả giao dịch." };
+  }
+  if (noteRaw.length > 500) {
+    return { error: "Nội dung mô tả tối đa 500 ký tự." };
+  }
+
+  const dateValue = String(dateInput?.value || "").trim() || getFinanceTransactionDayKey(transaction);
+  if (!isValidDay(dateValue)) {
+    return { error: "Ngày giao dịch không hợp lệ." };
+  }
+
+  const normalizedType = normalizeFinanceTransactionType(transaction.type);
+  let category = "";
+  const subCategory = normalizeFinanceSubCategory(transaction.subCategory || "");
+  if (normalizedType === FINANCE_TYPE_OUT && !transaction.transferId) {
+    category = resolveFinanceExpenseCategoryCode(categoryInput?.value || "", { allowInactive: false });
+    if (!category) {
+      return { error: "Danh mục xuất không hợp lệ." };
+    }
+  }
+
+  const note = isAdjustmentFinanceNote(noteRaw) ? normalizeAdjustmentFinanceNote(noteRaw) : noteRaw;
+  return {
+    value: {
+      amount,
+      note,
+      transactionDate: dateValue,
+      category,
+      subCategory,
+    },
+  };
+}
+
+async function submitFinanceInlineEdit(transactionId) {
+  const transaction = getAdminEditableFinanceTransaction(transactionId);
+  if (!transaction) {
+    if (refs.financeResult) refs.financeResult.textContent = "Không tìm thấy giao dịch cần sửa.";
+    resetFinanceInlineAction();
+    renderFinance();
+    return;
+  }
+
+  const parsed = readFinanceInlineEditValues(transaction);
+  if (parsed.error) {
+    setFinanceInlineResultMessage(parsed.error);
+    return;
+  }
+
+  try {
+    if (runtime.remoteMode) {
+      await updateFinanceTransactionRemote(transaction, parsed.value);
+    } else {
+      applyFinanceTransactionUpdateLocal(transaction, parsed.value);
+    }
+
+    const balance = getFinanceBalanceByUserId(transaction.userId);
+    resetFinanceInlineAction();
+    state.financeSelectedUserId = transaction.userId || state.financeSelectedUserId;
+    if (refs.financeResult) {
+      refs.financeResult.textContent = `Đã cập nhật giao dịch. Số tồn hiện tại: ${formatMoney(balance)}.`;
+    }
+    renderFinance();
+  } catch (error) {
+    if (runtime.remoteMode) {
+      handleRemoteActionError(error, getFinanceInlineInput(".finance-inline-result"), "Không thể cập nhật giao dịch tài chính.");
+      return;
+    }
+    setFinanceInlineResultMessage(error?.message || "Không thể cập nhật giao dịch tài chính.");
   }
 }
 
@@ -4344,9 +4917,11 @@ async function deleteFinanceTransactionById(transactionId) {
     if (deletedIds.includes(state.financeEditingTransactionId)) {
       resetFinanceTransactionEditState();
     }
+    if (deletedIds.includes(state.financeInlineActionTransactionId)) {
+      resetFinanceInlineAction();
+    }
     if (refs.financeResult) {
       refs.financeResult.textContent = "Đã xoá giao dịch tài chính.";
-      showModal(refs.financeResult.textContent);
     }
     renderFinance();
   } catch (error) {
@@ -4411,6 +4986,10 @@ function syncFinanceFormForRole() {
       refs.financeCategory.value = allowCategory
         ? selectedCategory || getDefaultFinanceExpenseCategoryCode()
         : getDefaultFinanceExpenseCategoryCode();
+    }
+    if (refs.financeSubCategory) {
+      refs.financeSubCategory.disabled = !allowCategory;
+      refs.financeSubCategory.value = allowCategory ? normalizeFinanceSubCategory(editingTransaction.subCategory || "") : "";
     }
     if (refs.financeReceiptGroup) {
       refs.financeReceiptGroup.classList.add("hidden");
@@ -4489,6 +5068,13 @@ function syncFinanceFormForRole() {
       refs.financeCategory.value = defaultCategoryCode;
     } else if (!currentCategoryCode) {
       refs.financeCategory.value = defaultCategoryCode;
+    }
+  }
+  if (refs.financeSubCategory) {
+    const allowOutputFields = expenseMode || (canFundMode && isOutputMode && !isTransferOut);
+    refs.financeSubCategory.disabled = !allowOutputFields;
+    if (!allowOutputFields) {
+      refs.financeSubCategory.value = "";
     }
   }
 
@@ -4596,6 +5182,7 @@ function readFinanceFormValues() {
   const amount = unformatNumber(refs.financeAmount?.value || "");
   const transactionDate = String(refs.financeDate?.value || "").trim();
   const category = resolveFinanceExpenseCategoryCode(refs.financeCategory?.value || "", { allowInactive: false });
+  const subCategory = normalizeFinanceSubCategory(refs.financeSubCategory?.value || "");
   const noteInput = refs.financeNote?.value || "";
   const normalizedNote = normalizeFinanceNoteText(noteInput);
   const adjustment = isAdjustmentFinanceNote(normalizedNote);
@@ -4694,6 +5281,7 @@ function readFinanceFormValues() {
     isTransferOut,
     transferTargetUserId: isTransferOut ? selectedMemberId : "",
     category: type === FINANCE_TYPE_OUT && !isTransferOut ? category : "",
+    subCategory: type === FINANCE_TYPE_OUT && !isTransferOut ? subCategory : "",
     receiptImage: type === FINANCE_TYPE_OUT && !isTransferOut ? receiptImage : null,
   };
 }
@@ -4925,14 +5513,17 @@ function renderAdminFinanceReport(allRows, members, options = {}) {
     if (normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_OUT) {
       const categoryCode = getFinanceEffectiveCategoryCode(item, latestReclassMap);
       if (categoryCode) {
-        if (!categoryGrouped.has(categoryCode)) {
-          categoryGrouped.set(categoryCode, {
+        const subCategory = normalizeFinanceSubCategory(item.subCategory || "");
+        const bucketKey = `${categoryCode}::${subCategory || "__EMPTY__"}`;
+        if (!categoryGrouped.has(bucketKey)) {
+          categoryGrouped.set(bucketKey, {
             code: categoryCode,
+            subCategory,
             amount: 0,
             count: 0,
           });
         }
-        const categoryRow = categoryGrouped.get(categoryCode);
+        const categoryRow = categoryGrouped.get(bucketKey);
         categoryRow.amount += item.amount || 0;
         categoryRow.count += 1;
       }
@@ -4970,9 +5561,11 @@ function renderAdminFinanceReport(allRows, members, options = {}) {
   refs.financeReportCategoryBody.innerHTML = categoryRows
     .map((row) => {
       const percent = totalOutForCategory > 0 ? ((row.amount / totalOutForCategory) * 100).toFixed(2) : "0.00";
+      const categoryLabel = getFinanceExpenseCategoryLabel(row.code);
+      const subCategoryLabel = row.subCategory || "(Chưa gán hạng mục)";
       return `
         <tr>
-          <td>${escapeHtml(getFinanceExpenseCategoryLabel(row.code))}</td>
+          <td>${escapeHtml(`${categoryLabel} / ${subCategoryLabel}`)}</td>
           <td>${formatMoney(row.amount)}</td>
           <td>${row.count}</td>
           <td>${percent}%</td>
@@ -5032,10 +5625,10 @@ function renderMemberFinance(currentUser) {
   }
   renderAdminFinanceReport(allRows, [currentUser], { forceUserId: currentUser.id });
 
-  setFinanceTableHead(["Thời gian", "Nhân viên", "Danh mục", "Số tiền", "Nội dung", "Hóa đơn"]);
+  setFinanceTableHead(["Thời gian", "Nhân viên", "Danh mục", "Hạng mục", "Số tiền", "Nội dung", "Hóa đơn"]);
   if (filteredExpenses.length === 0) {
     refs.financeTableBody.innerHTML =
-      '<tr><td class="empty-cell" colspan="6">Không có khoản xuất phù hợp bộ lọc hiện tại.</td></tr>';
+      '<tr><td class="empty-cell" colspan="7">Không có khoản xuất phù hợp bộ lọc hiện tại.</td></tr>';
     renderFinanceLoadMoreButton(0);
     return;
   }
@@ -5047,6 +5640,7 @@ function renderMemberFinance(currentUser) {
         <td>${new Date(item.createdAt || Date.now()).toLocaleString("vi-VN")}</td>
         <td>${escapeHtml(getFinanceRelatedMemberDisplay(item, { currentUserId: currentUser.id, selfLabel: "Tự xuất" }))}</td>
         <td>${escapeHtml(getFinanceEffectiveCategoryLabel(item, latestReclassMap))}</td>
+        <td>${escapeHtml(getFinanceSubCategoryLabel(item))}</td>
         <td>${formatMoney(item.amount || 0)}</td>
         <td>${escapeHtml(item.note || "-")}</td>
         <td>${formatFinanceAttachmentCell(item)}</td>
@@ -5130,6 +5724,7 @@ function renderAdminFinance() {
   }
 
   if (!state.financeSelectedUserId) {
+    resetFinanceInlineAction();
     setFinanceVisibleRows([]);
     renderFinanceLoadMoreButton(0);
     if (refs.financeHistoryTitle) {
@@ -5139,6 +5734,7 @@ function renderAdminFinance() {
       "Thời gian",
       "Loại",
       "Danh mục",
+      "Hạng mục",
       "Số tiền",
       "Người thực hiện",
       "Nhân viên liên quan",
@@ -5146,7 +5742,7 @@ function renderAdminFinance() {
       "Hóa đơn",
       "Thao tác",
     ]);
-    refs.financeTableBody.innerHTML = '<tr><td class="empty-cell" colspan="9">Chọn nhân viên để xem lịch sử giao dịch.</td></tr>';
+    refs.financeTableBody.innerHTML = '<tr><td class="empty-cell" colspan="10">Chọn nhân viên để xem lịch sử giao dịch.</td></tr>';
     return;
   }
 
@@ -5158,12 +5754,19 @@ function renderAdminFinance() {
   }
 
   const userRows = filterFinanceHistoryRows(allRows.filter((item) => item.userId === state.financeSelectedUserId));
+  if (
+    state.financeInlineActionTransactionId &&
+    !userRows.some((item) => item.id === state.financeInlineActionTransactionId)
+  ) {
+    resetFinanceInlineAction();
+  }
   const visibleRows = getFinanceRowsWithHistoryLimit(userRows);
   setFinanceVisibleRows(visibleRows);
   setFinanceTableHead([
     "Thời gian",
     "Loại",
     "Danh mục",
+    "Hạng mục",
     "Số tiền",
     "Người thực hiện",
     "Nhân viên liên quan",
@@ -5173,18 +5776,20 @@ function renderAdminFinance() {
   ]);
   if (userRows.length === 0) {
     refs.financeTableBody.innerHTML =
-      '<tr><td class="empty-cell" colspan="9">Không có giao dịch phù hợp bộ lọc hiện tại.</td></tr>';
+      '<tr><td class="empty-cell" colspan="10">Không có giao dịch phù hợp bộ lọc hiện tại.</td></tr>';
     renderFinanceLoadMoreButton(0);
     return;
   }
 
   refs.financeTableBody.innerHTML = visibleRows
-    .map(
-      (item) => `
+    .map((item) => {
+      const inlineRowHtml = buildFinanceInlineActionRowHtml(item);
+      return `
       <tr>
         <td>${new Date(item.createdAt || Date.now()).toLocaleString("vi-VN")}</td>
         <td>${escapeHtml(getFinanceTypeLabel(item.type))}</td>
         <td>${escapeHtml(getFinanceEffectiveCategoryLabel(item, latestReclassMap))}</td>
+        <td>${escapeHtml(getFinanceSubCategoryLabel(item))}</td>
         <td>${formatMoney(item.amount || 0)}</td>
         <td>${escapeHtml(getUserDisplayName(item.createdBy || item.created_by))}</td>
         <td>${escapeHtml(getFinanceRelatedMemberDisplay(item, { emptyLabel: "-" }))}</td>
@@ -5193,15 +5798,11 @@ function renderAdminFinance() {
         <td>
           <button type="button" class="secondary-btn table-btn finance-edit-transaction-btn" data-transaction-id="${escapeHtml(item.id)}">Sửa</button>
           <button type="button" class="secondary-btn table-btn finance-delete-transaction-btn" data-transaction-id="${escapeHtml(item.id)}">Xoá</button>
-          ${
-            isFinanceCategoryReclassEligible(item)
-              ? `<button type="button" class="secondary-btn table-btn finance-reclass-open-btn" data-transaction-id="${escapeHtml(item.id)}">Chỉnh danh mục</button>`
-              : ""
-          }
         </td>
       </tr>
-    `,
-    )
+      ${inlineRowHtml}
+    `;
+    })
     .join("");
   renderFinanceLoadMoreButton(userRows.length);
 }
@@ -5645,6 +6246,7 @@ function addFinanceTransaction() {
       type: FINANCE_TYPE_IN,
       amount: values.amount,
       category: "",
+      subCategory: "",
       note: values.note,
       isAdjustment: false,
       adjustmentOf: "",
@@ -5664,6 +6266,7 @@ function addFinanceTransaction() {
       type: FINANCE_TYPE_OUT,
       amount: values.amount,
       category: "",
+      subCategory: "",
       note: values.note,
       isAdjustment: false,
       adjustmentOf: "",
@@ -5687,6 +6290,7 @@ function addFinanceTransaction() {
       type: values.type,
       amount: values.amount,
       category: values.category || "",
+      subCategory: values.type === FINANCE_TYPE_OUT ? values.subCategory || "" : "",
       note: values.note,
       isAdjustment: Boolean(values.adjustment),
       adjustmentOf: "",
@@ -5759,6 +6363,7 @@ function renderFinance() {
 
   const currentUser = getCurrentUser();
   if (!currentUser) {
+    resetFinanceInlineAction();
     resetFinanceTransactionEditState({ clearInputs: false });
     setFinanceVisibleRows([]);
     renderFinanceLoadMoreButton(0);
@@ -5780,6 +6385,7 @@ function renderFinance() {
   syncFinanceFormForRole();
 
   if (!hasFeaturePermission(currentUser, "finance")) {
+    resetFinanceInlineAction();
     resetFinanceTransactionEditState({ clearInputs: false });
     setFinanceVisibleRows([]);
     renderFinanceLoadMoreButton(0);
@@ -5805,10 +6411,564 @@ function renderFinance() {
   }
 
   resetFinanceReclassTarget();
+  resetFinanceInlineAction();
   resetFinanceTransactionEditState({ clearInputs: false });
   renderMemberFinance(currentUser);
   renderFinanceCategoryAdminPanel(currentUser);
   renderFinanceReclassPanel(currentUser);
+}
+
+function formatInventoryQuantity(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num === 0) return "0";
+  return num.toLocaleString("vi-VN", { maximumFractionDigits: 3 });
+}
+
+function getInventoryCreatorName(userId) {
+  if (!userId) return "-";
+  const user = state.users.find((item) => item.id === userId);
+  if (!user) return "Không xác định";
+  return `${user.fullName} (${user.username})`;
+}
+
+function buildInventoryStockRows(area, rows) {
+  const stockMap = new Map();
+  rows
+    .filter((item) => item.area === area)
+    .forEach((item) => {
+      const key = String(item.itemName || "").trim();
+      if (!key) return;
+      if (!stockMap.has(key)) {
+        stockMap.set(key, { itemName: key, totalIn: 0, totalOut: 0, stock: 0 });
+      }
+      const target = stockMap.get(key);
+      if (item.type === INVENTORY_TYPE_IN) {
+        target.totalIn += Number(item.quantity || 0);
+      } else if (item.type === INVENTORY_TYPE_OUT) {
+        target.totalOut += Number(item.quantity || 0);
+      }
+      target.stock = target.totalIn - target.totalOut;
+    });
+
+  return [...stockMap.values()].sort((a, b) => a.itemName.localeCompare(b.itemName, "vi"));
+}
+
+function renderInventoryStockTable(bodyRef, rows) {
+  if (!bodyRef) return;
+  if (!rows.length) {
+    bodyRef.innerHTML = '<tr><td class="empty-cell" colspan="4">Chưa có dữ liệu.</td></tr>';
+    return;
+  }
+
+  bodyRef.innerHTML = rows
+    .map(
+      (item) => `
+      <tr>
+        <td>${escapeHtml(item.itemName)}</td>
+        <td>${formatInventoryQuantity(item.totalIn)}</td>
+        <td>${formatInventoryQuantity(item.totalOut)}</td>
+        <td>${formatInventoryQuantity(item.stock)}</td>
+      </tr>
+    `,
+    )
+    .join("");
+}
+
+function renderInventoryItemOptions() {
+  if (!refs.inventoryItemOptions) return;
+  const currentInput = String(refs.inventoryItemName?.value || "");
+  const query = normalizeTextValue(currentInput);
+  const names = [...new Set(state.inventoryTransactions.map((item) => String(item.itemName || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "vi"));
+  const selectedNames = (query ? names.filter((name) => normalizeTextValue(name).includes(query)) : names).slice(0, 200);
+  refs.inventoryItemOptions.innerHTML = selectedNames.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+}
+
+function getInventoryTransactionById(transactionId) {
+  const targetId = typeof transactionId === "string" ? transactionId.trim() : "";
+  if (!targetId) return null;
+  return state.inventoryTransactions.find((item) => item.id === targetId) || null;
+}
+
+function getAdminEditableInventoryTransaction(transactionId) {
+  const currentUser = getCurrentUser();
+  if (!isAdmin(currentUser)) return null;
+  return getInventoryTransactionById(transactionId);
+}
+
+function resetInventoryInlineEdit() {
+  state.inventoryInlineEditTransactionId = "";
+}
+
+function getInventoryEditableNoteValue(item) {
+  const note = typeof item?.note === "string" ? item.note : "";
+  if (String(item?.transferRole || "").toUpperCase() !== "IN") return note;
+  return note.replace(/^\[Từ kho\]\s*/u, "");
+}
+
+function formatInventoryInlineNoteByRole(role, note) {
+  if (String(role || "").toUpperCase() === "IN") {
+    return note ? `[Từ kho] ${note}` : "[Từ kho]";
+  }
+  return note;
+}
+
+function buildInventoryInlineEditorRowHtml(item) {
+  const quantityValue = Number.isFinite(Number(item.quantity)) ? String(Number(item.quantity)) : "";
+  const transferHint = item.transferId
+    ? `<p class="card-desc inventory-inline-hint">Giao dịch này thuộc luồng chuyển kho. Khi lưu, hệ thống sẽ cập nhật cả 2 chiều Kho/Spa.</p>`
+    : "";
+
+  return `
+    <tr class="inventory-inline-editor-row" data-editor-transaction-id="${escapeHtml(item.id)}">
+      <td colspan="9">
+        ${transferHint}
+        <div class="form-grid inventory-inline-editor-grid">
+          <label>
+            Ngày giao dịch
+            <input type="date" id="inventory-inline-edit-date" value="${escapeHtml(item.date || "")}" />
+          </label>
+          <label>
+            Tên hàng
+            <input type="text" id="inventory-inline-edit-item-name" value="${escapeHtml(item.itemName || "")}" />
+          </label>
+          <label>
+            Số lượng
+            <input type="number" id="inventory-inline-edit-quantity" min="0.001" step="0.001" value="${escapeHtml(quantityValue)}" />
+          </label>
+          <label class="inventory-inline-wide">
+            Ghi chú
+            <input type="text" id="inventory-inline-edit-note" value="${escapeHtml(getInventoryEditableNoteValue(item))}" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="primary-btn table-btn inventory-inline-save-btn" data-transaction-id="${escapeHtml(item.id)}">Lưu</button>
+          <button type="button" class="secondary-btn table-btn inventory-inline-cancel-btn">Huỷ</button>
+        </div>
+        <div class="result-box inventory-inline-result"></div>
+      </td>
+    </tr>
+  `;
+}
+
+function openInventoryInlineEdit(transactionId) {
+  const transaction = getAdminEditableInventoryTransaction(transactionId);
+  if (!transaction) {
+    if (refs.inventoryResult) refs.inventoryResult.textContent = "Chỉ quản trị viên mới có quyền chỉnh sửa lịch sử kho/spa.";
+    return;
+  }
+
+  if (state.inventoryInlineEditTransactionId === transaction.id) {
+    resetInventoryInlineEdit();
+    renderInventory();
+    return;
+  }
+
+  state.inventoryInlineEditTransactionId = transaction.id;
+  renderInventory();
+}
+
+function readInventoryInlineEditValues() {
+  const itemName = String(document.getElementById("inventory-inline-edit-item-name")?.value || "").trim();
+  const quantity = Number(document.getElementById("inventory-inline-edit-quantity")?.value || 0);
+  const date = String(document.getElementById("inventory-inline-edit-date")?.value || "").trim();
+  const note = String(document.getElementById("inventory-inline-edit-note")?.value || "").trim();
+
+  if (!itemName || !isValidDay(date) || !Number.isFinite(quantity) || quantity <= 0) {
+    return null;
+  }
+
+  return {
+    itemName,
+    quantity,
+    date,
+    note,
+  };
+}
+
+function getInventoryInlineResultBox() {
+  return refs.inventoryTableBody?.querySelector(".inventory-inline-result") || null;
+}
+
+function updateInventoryTransactionLocal(transaction, values) {
+  const transferId = String(transaction.transferId || "").trim();
+
+  const applyToRow = (row) => {
+    row.itemName = values.itemName;
+    row.quantity = values.quantity;
+    row.date = values.date;
+    row.note = formatInventoryInlineNoteByRole(row.transferRole, values.note);
+  };
+
+  if (!transferId) {
+    applyToRow(transaction);
+    return;
+  }
+
+  let hasApplied = false;
+  state.inventoryTransactions.forEach((row) => {
+    if (String(row.transferId || "").trim() !== transferId) return;
+    applyToRow(row);
+    hasApplied = true;
+  });
+
+  if (!hasApplied) {
+    applyToRow(transaction);
+  }
+}
+
+async function submitInventoryInlineEdit(transactionId) {
+  const transaction = getAdminEditableInventoryTransaction(transactionId);
+  if (!transaction) {
+    if (refs.inventoryResult) refs.inventoryResult.textContent = "Chỉ quản trị viên mới có quyền chỉnh sửa lịch sử kho/spa.";
+    return;
+  }
+
+  const values = readInventoryInlineEditValues();
+  if (!values) {
+    const resultBox = getInventoryInlineResultBox();
+    if (resultBox) {
+      resultBox.textContent = "Vui lòng nhập tên hàng, ngày hợp lệ và số lượng > 0.";
+    } else if (refs.inventoryResult) {
+      refs.inventoryResult.textContent = "Vui lòng nhập tên hàng, ngày hợp lệ và số lượng > 0.";
+    }
+    return;
+  }
+
+  if (runtime.remoteMode) {
+    try {
+      const payload = await apiRequest(`/inventory/transactions/${encodeURIComponent(transaction.id)}`, {
+        method: "PATCH",
+        body: values,
+      });
+
+      if (Array.isArray(payload?.inventoryTransactions)) {
+        state.inventoryTransactions = payload.inventoryTransactions;
+        normalizeAllRecords();
+      } else {
+        await syncFromServer({ preserveTab: true, silent: true });
+      }
+
+      resetInventoryInlineEdit();
+      if (refs.inventoryResult) refs.inventoryResult.textContent = "Đã cập nhật giao dịch kho/spa.";
+      renderInventory();
+    } catch (error) {
+      handleRemoteActionError(error, getInventoryInlineResultBox(), "Không thể cập nhật giao dịch kho/spa.");
+    }
+    return;
+  }
+
+  updateInventoryTransactionLocal(transaction, values);
+  normalizeAllRecords();
+  saveState();
+  resetInventoryInlineEdit();
+  if (refs.inventoryResult) refs.inventoryResult.textContent = "Đã cập nhật giao dịch kho/spa.";
+  renderInventory();
+}
+
+function renderInventory() {
+  if (!refs.inventoryTableBody || !refs.inventorySummary) return;
+  const currentUser = getCurrentUser();
+  const currentArea = getInventoryViewArea();
+  setInventoryViewArea(currentArea, { triggerRender: false });
+  const isRootWarehouse = currentArea === INVENTORY_AREA_WAREHOUSE;
+  const areaLabel = isRootWarehouse ? "Kho" : "Spa";
+
+  if (refs.inventoryViewDesc) {
+    refs.inventoryViewDesc.textContent = isRootWarehouse
+      ? "Đang ở khu vực Kho: có thể Nhập và Xuất. Khi Xuất có thể chọn khu vực nhận."
+      : "Đang ở khu vực Spa: chỉ được Xuất. Dữ liệu Nhập vào Spa đi từ luồng Kho xuất.";
+  }
+  if (refs.inventorySubmitBtn) {
+    refs.inventorySubmitBtn.textContent = isRootWarehouse ? "Lưu giao dịch Kho" : "Lưu giao dịch Spa";
+  }
+  if (refs.inventoryStockTitle) {
+    refs.inventoryStockTitle.textContent = `Tồn ${areaLabel} theo mặt hàng`;
+  }
+  if (refs.inventoryHistoryTitle) {
+    refs.inventoryHistoryTitle.textContent = `Lịch sử giao dịch ${areaLabel}`;
+  }
+  if (refs.inventoryStockWarehouseWrap) {
+    refs.inventoryStockWarehouseWrap.classList.toggle("hidden", !isRootWarehouse);
+  }
+  if (refs.inventoryStockSpaWrap) {
+    refs.inventoryStockSpaWrap.classList.toggle("hidden", isRootWarehouse);
+  }
+
+  if (refs.inventoryType) {
+    refs.inventoryType.disabled = !isRootWarehouse;
+    if (!isRootWarehouse) {
+      refs.inventoryType.value = INVENTORY_TYPE_OUT;
+    }
+  }
+  const currentType =
+    normalizeInventoryType(refs.inventoryType?.value || "") || (isRootWarehouse ? INVENTORY_TYPE_IN : INVENTORY_TYPE_OUT);
+
+  const canSelectTransferTarget = isRootWarehouse && currentType === INVENTORY_TYPE_OUT;
+  if (refs.inventoryTransferWrap) {
+    refs.inventoryTransferWrap.classList.toggle("hidden", !canSelectTransferTarget);
+  }
+  if (refs.inventoryTransferTargetArea && !canSelectTransferTarget) {
+    refs.inventoryTransferTargetArea.value = "";
+  }
+  const transferTargetArea = normalizeInventoryArea(refs.inventoryTransferTargetArea?.value || "");
+  renderInventoryItemOptions();
+
+  if (!currentUser) {
+    resetInventoryInlineEdit();
+    if (refs.inventoryResult) refs.inventoryResult.textContent = "Vui lòng đăng nhập để dùng quản lý kho.";
+    if (refs.inventorySubmitBtn) refs.inventorySubmitBtn.disabled = true;
+    refs.inventorySummary.innerHTML = "";
+    refs.inventoryTableBody.innerHTML = '<tr><td class="empty-cell" colspan="9">Vui lòng đăng nhập.</td></tr>';
+    renderInventoryStockTable(refs.inventoryStockWarehouseBody, []);
+    renderInventoryStockTable(refs.inventoryStockSpaBody, []);
+    return;
+  }
+
+  if (!hasFeaturePermission(currentUser, "inventory")) {
+    resetInventoryInlineEdit();
+    if (refs.inventoryResult) refs.inventoryResult.textContent = "Bạn chưa có quyền truy cập quản lý kho.";
+    if (refs.inventorySubmitBtn) refs.inventorySubmitBtn.disabled = true;
+    refs.inventorySummary.innerHTML = "";
+    refs.inventoryTableBody.innerHTML = '<tr><td class="empty-cell" colspan="9">Bạn chưa có quyền xem dữ liệu kho/spa.</td></tr>';
+    renderInventoryStockTable(refs.inventoryStockWarehouseBody, []);
+    renderInventoryStockTable(refs.inventoryStockSpaBody, []);
+    return;
+  }
+
+  const adminCanEdit = isAdmin(currentUser);
+  if (!adminCanEdit) {
+    resetInventoryInlineEdit();
+  }
+
+  let canSubmit = canMutateInventoryByAreaAndType(currentUser, currentArea, currentType);
+  if (!isRootWarehouse && currentType === INVENTORY_TYPE_IN) {
+    canSubmit = false;
+  }
+  if (transferTargetArea) {
+    canSubmit =
+      canMutateInventoryByAreaAndType(currentUser, INVENTORY_AREA_WAREHOUSE, INVENTORY_TYPE_OUT) &&
+      canMutateInventoryByAreaAndType(currentUser, transferTargetArea, INVENTORY_TYPE_IN);
+  }
+  if (refs.inventorySubmitBtn) refs.inventorySubmitBtn.disabled = !canSubmit;
+  if (!isRootWarehouse && currentType === INVENTORY_TYPE_IN && refs.inventoryResult) {
+    refs.inventoryResult.textContent = "Ngoài kho, khu vực chỉ được xuất. Nhập sẽ đi từ kho xuất.";
+  } else if (transferTargetArea && !canSubmit && refs.inventoryResult) {
+    refs.inventoryResult.textContent = "Bạn cần quyền Xuất kho và Nhập khu vực nhận để chuyển hàng.";
+  } else if (!canSubmit && refs.inventoryResult) {
+    refs.inventoryResult.textContent = getInventoryPermissionMessage(currentArea, currentType);
+  }
+
+  const allRows = [...state.inventoryTransactions].sort(sortByLatest);
+  if (
+    state.inventoryInlineEditTransactionId &&
+    !allRows.some((item) => item.id === state.inventoryInlineEditTransactionId)
+  ) {
+    resetInventoryInlineEdit();
+  }
+  const query = normalizeTextValue(refs.inventorySearch?.value || "");
+  const filteredRows = allRows.filter((item) => {
+    if (item.area !== currentArea) return false;
+    if (!query) return true;
+    const haystack = normalizeTextValue(`${item.itemName || ""} ${item.note || ""} ${item.area || ""} ${item.type || ""}`);
+    return haystack.includes(query);
+  });
+
+  if (!filteredRows.length) {
+    refs.inventoryTableBody.innerHTML = `<tr><td class="empty-cell" colspan="9">Chưa có giao dịch ${areaLabel} phù hợp.</td></tr>`;
+  } else {
+    refs.inventoryTableBody.innerHTML = filteredRows
+      .map((item) => {
+        const flow = item.transferId
+          ? item.transferRole === "OUT"
+            ? `Kho -> ${item.transferCounterpartyArea || "Khu vực nhận"} (xuất)`
+            : item.transferRole === "IN"
+              ? `Kho -> ${item.area} (nhập)`
+              : "Chuyển nội bộ"
+          : "Giao dịch thường";
+        const actionCell = adminCanEdit
+          ? `<button type="button" class="secondary-btn table-btn inventory-edit-btn" data-transaction-id="${escapeHtml(item.id)}">Sửa</button>`
+          : "-";
+        const inlineEditorHtml =
+          adminCanEdit && state.inventoryInlineEditTransactionId === item.id ? buildInventoryInlineEditorRowHtml(item) : "";
+
+        return `
+        <tr>
+          <td>${formatDate(item.date)}</td>
+          <td>${escapeHtml(item.area)}</td>
+          <td>${escapeHtml(item.type)}</td>
+          <td>${escapeHtml(item.itemName)}</td>
+          <td>${formatInventoryQuantity(item.quantity)}</td>
+          <td>${escapeHtml(flow)}</td>
+          <td>${escapeHtml(getInventoryCreatorName(item.createdBy || item.created_by))}</td>
+          <td>${escapeHtml(item.note || "-")}</td>
+          <td>${actionCell}</td>
+        </tr>
+        ${inlineEditorHtml}
+      `;
+      })
+      .join("");
+  }
+
+  const warehouseRows = buildInventoryStockRows(INVENTORY_AREA_WAREHOUSE, allRows);
+  const spaRows = buildInventoryStockRows(INVENTORY_AREA_SPA, allRows);
+  renderInventoryStockTable(refs.inventoryStockWarehouseBody, warehouseRows);
+  renderInventoryStockTable(refs.inventoryStockSpaBody, spaRows);
+  const activeRows = isRootWarehouse ? warehouseRows : spaRows;
+
+  refs.inventorySummary.innerHTML = `
+    <div class="summary-chip">
+      <p>Mặt hàng ${areaLabel}</p>
+      <strong>${activeRows.length}</strong>
+    </div>
+  `;
+}
+
+function readInventoryFormValues() {
+  const itemName = String(refs.inventoryItemName?.value || "").trim();
+  const area = getInventoryViewArea();
+  const isRootWarehouse = area === INVENTORY_AREA_WAREHOUSE;
+  const selectedType = normalizeInventoryType(refs.inventoryType?.value || "");
+  const type = isRootWarehouse ? selectedType : INVENTORY_TYPE_OUT;
+  const quantity = Number(refs.inventoryQuantity?.value || 0);
+  const date = String(refs.inventoryDate?.value || "").trim();
+  const note = String(refs.inventoryNote?.value || "");
+  const transferTargetArea = normalizeInventoryArea(refs.inventoryTransferTargetArea?.value || "");
+  const user = getCurrentUser();
+
+  if (!itemName || !area || !type || !isValidDay(date) || !Number.isFinite(quantity) || quantity <= 0) {
+    refs.inventoryResult.textContent = "Vui lòng nhập đầy đủ tên hàng, khu vực, loại giao dịch, ngày hợp lệ và số lượng > 0.";
+    return null;
+  }
+
+  if (!isRootWarehouse && type === INVENTORY_TYPE_IN) {
+    refs.inventoryResult.textContent = "Ngoài kho, khu vực chỉ được xuất. Nhập sẽ đi từ kho xuất.";
+    return null;
+  }
+
+  if (transferTargetArea && !(isRootWarehouse && type === INVENTORY_TYPE_OUT)) {
+    refs.inventoryResult.textContent = "Chỉ giao dịch Kho xuất mới được chọn khu vực nhận.";
+    return null;
+  }
+
+  if (transferTargetArea === INVENTORY_AREA_WAREHOUSE) {
+    refs.inventoryResult.textContent = "Khu vực nhận phải khác Kho.";
+    return null;
+  }
+
+  if (transferTargetArea) {
+    const canTransfer =
+      canMutateInventoryByAreaAndType(user, INVENTORY_AREA_WAREHOUSE, INVENTORY_TYPE_OUT) &&
+      canMutateInventoryByAreaAndType(user, transferTargetArea, INVENTORY_TYPE_IN);
+    if (!canTransfer) {
+      refs.inventoryResult.textContent = "Bạn cần quyền Xuất kho và Nhập khu vực nhận để chuyển hàng.";
+      return null;
+    }
+  } else if (!canMutateInventoryByAreaAndType(user, area, type)) {
+    refs.inventoryResult.textContent = getInventoryPermissionMessage(area, type);
+    return null;
+  }
+
+  return { itemName, area, type, quantity, date, note, transferTargetArea };
+}
+
+function resetInventoryForm() {
+  if (refs.inventoryItemName) refs.inventoryItemName.value = "";
+  if (refs.inventoryQuantity) refs.inventoryQuantity.value = "";
+  if (refs.inventoryNote) refs.inventoryNote.value = "";
+  if (refs.inventoryTransferTargetArea) refs.inventoryTransferTargetArea.value = "";
+}
+
+function formatInventorySuccessMessage(values) {
+  if (values.transferTargetArea) {
+    return `Đã ghi nhận chuyển kho -> ${values.transferTargetArea}: ${formatInventoryQuantity(values.quantity)} ${values.itemName}.`;
+  }
+  return `Đã ghi nhận ${values.type} ${formatInventoryQuantity(values.quantity)} ${values.itemName} cho khu vực ${values.area}.`;
+}
+
+function addInventoryTransaction() {
+  if (!ensureFeature("inventory", refs.inventoryResult)) return;
+  if (runtime.remoteMode) {
+    void addInventoryTransactionRemote();
+    return;
+  }
+
+  const values = readInventoryFormValues();
+  if (!values) return;
+  const currentUser = getCurrentUser();
+  if (!currentUser) return;
+
+  const nowIso = new Date().toISOString();
+  const transferId = values.transferTargetArea ? createId("invtf") : "";
+  const primaryTransaction = {
+    id: createId("inv"),
+    itemName: values.itemName,
+    area: values.area,
+    type: values.type,
+    quantity: values.quantity,
+    note: values.note,
+    date: values.date,
+    transferId,
+    transferRole: values.transferTargetArea ? "OUT" : "",
+    transferCounterpartyArea: values.transferTargetArea || "",
+    createdBy: currentUser.id,
+    created_by: currentUser.id,
+    createdAt: nowIso,
+    timestamp: nowIso,
+  };
+  if (values.transferTargetArea) {
+    state.inventoryTransactions.unshift({
+      id: createId("inv"),
+      itemName: values.itemName,
+      area: values.transferTargetArea,
+      type: INVENTORY_TYPE_IN,
+      quantity: values.quantity,
+      note: values.note ? `[Từ kho] ${values.note}` : "[Từ kho]",
+      date: values.date,
+      transferId,
+      transferRole: "IN",
+      transferCounterpartyArea: INVENTORY_AREA_WAREHOUSE,
+      createdBy: currentUser.id,
+      created_by: currentUser.id,
+      createdAt: nowIso,
+      timestamp: nowIso,
+    });
+  }
+  state.inventoryTransactions.unshift(primaryTransaction);
+  normalizeAllRecords();
+  saveState();
+  resetInventoryInlineEdit();
+  resetInventoryForm();
+  refs.inventoryResult.textContent = formatInventorySuccessMessage(values);
+  showModal(refs.inventoryResult.textContent);
+  renderInventory();
+}
+
+async function addInventoryTransactionRemote() {
+  const values = readInventoryFormValues();
+  if (!values) return;
+
+  try {
+    const payload = await apiRequest("/inventory/transactions", {
+      method: "POST",
+      body: values,
+    });
+
+    if (Array.isArray(payload?.inventoryTransactions)) {
+      state.inventoryTransactions = payload.inventoryTransactions;
+      normalizeAllRecords();
+    } else {
+      await syncFromServer({ preserveTab: true, silent: true });
+    }
+
+    resetInventoryInlineEdit();
+    resetInventoryForm();
+    refs.inventoryResult.textContent = formatInventorySuccessMessage(values);
+    showModal(refs.inventoryResult.textContent);
+    renderInventory();
+  } catch (error) {
+    handleRemoteActionError(error, refs.inventoryResult, "Không thể ghi nhận giao dịch kho/spa.");
+  }
 }
 
 function addMemberAccount() {
@@ -5861,6 +7021,11 @@ function addMemberAccount() {
       referrals: Boolean(refs.permVisits.checked),
       referralsEdit: Boolean(refs.permVisitsEdit.checked),
       referralsDelete: Boolean(refs.permVisitsDelete.checked),
+      inventory: Boolean(refs.permInventory?.checked),
+      inventoryWarehouseIn: Boolean(refs.permInventoryWarehouseIn?.checked),
+      inventoryWarehouseOut: Boolean(refs.permInventoryWarehouseOut?.checked),
+      inventorySpaIn: Boolean(refs.permInventorySpaIn?.checked),
+      inventorySpaOut: Boolean(refs.permInventorySpaOut?.checked),
       finance: Boolean(refs.permFinance.checked),
       financeFund: Boolean(refs.permFinanceFund.checked),
       dataCleanup: Boolean(refs.permDataCleanup.checked),
@@ -5926,6 +7091,11 @@ async function addMemberAccountRemote() {
           referrals: Boolean(refs.permVisits.checked),
           referralsEdit: Boolean(refs.permVisitsEdit.checked),
           referralsDelete: Boolean(refs.permVisitsDelete.checked),
+          inventory: Boolean(refs.permInventory?.checked),
+          inventoryWarehouseIn: Boolean(refs.permInventoryWarehouseIn?.checked),
+          inventoryWarehouseOut: Boolean(refs.permInventoryWarehouseOut?.checked),
+          inventorySpaIn: Boolean(refs.permInventorySpaIn?.checked),
+          inventorySpaOut: Boolean(refs.permInventorySpaOut?.checked),
           finance: Boolean(refs.permFinance.checked),
           financeFund: Boolean(refs.permFinanceFund.checked),
           dataCleanup: Boolean(refs.permDataCleanup.checked),
@@ -6011,11 +7181,13 @@ function handleUserTableChange(event) {
   if (!input) return;
 
   const permissionKey = input.dataset.permission || "";
-  if (!["visits", "visitsEdit", "visitsDelete"].includes(permissionKey)) {
-    return;
+  const row = input.closest("tr");
+  if (["visits", "visitsEdit", "visitsDelete"].includes(permissionKey)) {
+    syncMemberRowServicePermissions(row);
   }
-
-  syncMemberRowServicePermissions(input.closest("tr"));
+  if (permissionKey === "inventory") {
+    syncMemberRowInventoryPermissions(row);
+  }
 }
 
 async function handleUserTableClickRemote(event) {
@@ -6178,6 +7350,7 @@ function renderAll() {
   renderReferrals();
   renderReport();
   renderFinance();
+  renderInventory();
   renderUserAccounts();
 }
 
@@ -6260,6 +7433,17 @@ function syncMemberCreateServicePermissions() {
   refs.permReferralsDelete.checked = Boolean(refs.permVisitsDelete.checked);
 }
 
+function syncMemberCreateInventoryPermissions() {
+  if (!refs.permInventory) return;
+  const enabled = Boolean(refs.permInventory.checked);
+  if (!enabled) {
+    if (refs.permInventoryWarehouseIn) refs.permInventoryWarehouseIn.checked = false;
+    if (refs.permInventoryWarehouseOut) refs.permInventoryWarehouseOut.checked = false;
+    if (refs.permInventorySpaIn) refs.permInventorySpaIn.checked = false;
+    if (refs.permInventorySpaOut) refs.permInventorySpaOut.checked = false;
+  }
+}
+
 function syncMemberRowServicePermissions(row) {
   if (!row) return;
   const visitToggle = row.querySelector('input.permission-toggle[data-permission="visits"]');
@@ -6278,6 +7462,20 @@ function syncMemberRowServicePermissions(row) {
   if (visitDeleteToggle && referralDeleteToggle) {
     referralDeleteToggle.checked = visitDeleteToggle.checked;
   }
+}
+
+function syncMemberRowInventoryPermissions(row) {
+  if (!row) return;
+  const inventoryToggle = row.querySelector('input.permission-toggle[data-permission="inventory"]');
+  if (!inventoryToggle || inventoryToggle.checked) return;
+
+  const detailKeys = ["inventoryWarehouseIn", "inventoryWarehouseOut", "inventorySpaIn", "inventorySpaOut"];
+  detailKeys.forEach((key) => {
+    const toggle = row.querySelector(`input.permission-toggle[data-permission="${key}"]`);
+    if (toggle) {
+      toggle.checked = false;
+    }
+  });
 }
 
 function renderCustomers() {
@@ -6775,7 +7973,7 @@ function renderUserAccounts() {
   const currentUser = getCurrentUser();
   if (!isAdmin(currentUser)) {
     refs.userTableBody.innerHTML =
-      '<tr><td class="empty-cell" colspan="25">Chỉ quản trị viên được xem danh sách tài khoản.</td></tr>';
+      '<tr><td class="empty-cell" colspan="30">Chỉ quản trị viên được xem danh sách tài khoản.</td></tr>';
     return;
   }
 
@@ -6805,6 +8003,11 @@ function renderUserAccounts() {
           <tr>
             <td>${escapeHtml(user.fullName)} (Quản trị viên)</td>
             <td>${escapeHtml(user.username)}</td>
+            <td>Toàn quyền</td>
+            <td>Toàn quyền</td>
+            <td>Toàn quyền</td>
+            <td>Toàn quyền</td>
+            <td>Toàn quyền</td>
             <td>Toàn quyền</td>
             <td>Toàn quyền</td>
             <td>Toàn quyền</td>
@@ -6846,6 +8049,11 @@ function renderUserAccounts() {
           ${renderPermissionCheckbox(user.id, "visitsDelete", serviceDelete)}
           ${renderPermissionCheckbox(user.id, "finance", permissions.finance)}
           ${renderPermissionCheckbox(user.id, "financeFund", permissions.financeFund)}
+          ${renderPermissionCheckbox(user.id, "inventory", permissions.inventory)}
+          ${renderPermissionCheckbox(user.id, "inventoryWarehouseIn", permissions.inventoryWarehouseIn)}
+          ${renderPermissionCheckbox(user.id, "inventoryWarehouseOut", permissions.inventoryWarehouseOut)}
+          ${renderPermissionCheckbox(user.id, "inventorySpaIn", permissions.inventorySpaIn)}
+          ${renderPermissionCheckbox(user.id, "inventorySpaOut", permissions.inventorySpaOut)}
           ${renderPermissionCheckbox(user.id, "referrals", serviceAccess, "hidden")}
           ${renderPermissionCheckbox(user.id, "referralsEdit", serviceEdit, "hidden")}
           ${renderPermissionCheckbox(user.id, "referralsDelete", serviceDelete, "hidden")}
@@ -6926,6 +8134,73 @@ function normalizeAllRecords() {
   state.customers = state.customers.filter((item) => item && typeof item === "object");
   state.visits = state.visits.filter((item) => item && typeof item === "object");
   state.referrals = state.referrals.filter((item) => item && typeof item === "object");
+  state.inventoryTransactions = Array.isArray(state.inventoryTransactions)
+    ? state.inventoryTransactions
+        .filter((item) => item && typeof item === "object")
+        .map((item) => {
+          const itemName =
+            typeof item.itemName === "string"
+              ? item.itemName.trim()
+              : typeof item.name === "string"
+                ? item.name.trim()
+                : "";
+          const area = normalizeInventoryArea(item.area || item.zone || item.location);
+          const type = normalizeInventoryType(item.type);
+          const quantity = Number(item.quantity || item.amount || 0);
+          const note = typeof item.note === "string" ? item.note : "";
+          const date = typeof item.date === "string" ? item.date.trim() : "";
+          const createdBy =
+            typeof item.createdBy === "string"
+              ? item.createdBy
+              : typeof item.created_by === "string"
+                ? item.created_by
+                : "";
+          const createdAt =
+            typeof item.createdAt === "string"
+              ? item.createdAt
+              : typeof item.timestamp === "string"
+                ? item.timestamp
+                : new Date().toISOString();
+          const transferId =
+            typeof item.transferId === "string"
+              ? item.transferId
+              : typeof item.transfer_id === "string"
+                ? item.transfer_id
+                : "";
+          const transferRoleRaw =
+            typeof item.transferRole === "string"
+              ? item.transferRole
+              : typeof item.transfer_role === "string"
+                ? item.transfer_role
+                : "";
+          const transferRoleNormalized = String(transferRoleRaw || "")
+            .trim()
+            .toUpperCase();
+          const transferRole = transferRoleNormalized === "IN" || transferRoleNormalized === "OUT" ? transferRoleNormalized : "";
+          const transferCounterpartyArea = normalizeInventoryArea(
+            item.transferCounterpartyArea || item.transfer_counterparty_area || item.counterpartyArea,
+          );
+
+          return {
+            id: typeof item.id === "string" && item.id ? item.id : createId("inv"),
+            itemName,
+            area,
+            type,
+            quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 0,
+            note,
+            date,
+            transferId,
+            transferRole,
+            transferCounterpartyArea,
+            createdBy,
+            created_by: createdBy,
+            createdAt,
+            timestamp: createdAt,
+          };
+        })
+        .filter((item) => item.itemName && item.area && item.type && isValidDay(item.date) && item.quantity > 0)
+        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+    : [];
   state.financeExpenseCategories = normalizeFinanceExpenseCategories(state.financeExpenseCategories);
   const knownCategoryCodes = new Set(state.financeExpenseCategories.map((item) => item.code));
   const missingCategoryCodes = new Set();
@@ -6937,6 +8212,12 @@ function normalizeAllRecords() {
           const amount = Number(item.amount || 0);
           const note = typeof item.note === "string" ? item.note : "";
           const category = normalizeFinanceExpenseCategory(item.category);
+          const subCategoryRaw =
+            typeof item.subCategory === "string"
+              ? item.subCategory
+              : typeof item.sub_category === "string"
+                ? item.sub_category
+                : extractFinanceSubCategoryFromNote(note);
           if (type === FINANCE_TYPE_OUT && category && !knownCategoryCodes.has(category)) {
             missingCategoryCodes.add(category);
           }
@@ -6988,6 +8269,7 @@ function normalizeAllRecords() {
                 : typeof item.counterpartyUserId === "string"
                   ? item.counterpartyUserId
                   : "";
+          const subCategory = type === FINANCE_TYPE_OUT && !transferId ? normalizeFinanceSubCategory(subCategoryRaw) : "";
           const isAdjustment = Boolean(item.isAdjustment || item.adjustment) || Boolean(adjustmentOf) || isAdjustmentFinanceNote(note);
           const createdBy =
             typeof item.createdBy === "string"
@@ -7007,6 +8289,7 @@ function normalizeAllRecords() {
             type,
             amount: Number.isFinite(amount) && amount > 0 ? amount : 0,
             category: type === FINANCE_TYPE_OUT ? category : "",
+            subCategory,
             note,
             isAdjustment,
             adjustmentOf,
@@ -7102,6 +8385,21 @@ function normalizeAllRecords() {
     !state.financeTransactions.some((item) => item.id === state.financeEditingTransactionId)
   ) {
     state.financeEditingTransactionId = "";
+  }
+
+  if (
+    state.financeInlineActionTransactionId &&
+    !state.financeTransactions.some((item) => item.id === state.financeInlineActionTransactionId)
+  ) {
+    state.financeInlineActionTransactionId = "";
+    state.financeInlineActionMode = "";
+  }
+
+  if (
+    state.inventoryInlineEditTransactionId &&
+    !state.inventoryTransactions.some((item) => item.id === state.inventoryInlineEditTransactionId)
+  ) {
+    state.inventoryInlineEditTransactionId = "";
   }
 
   const visitGroups = new Set(state.visits.map((item) => `${item.customerId}|${monthOf(item.date)}`));

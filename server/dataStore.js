@@ -18,6 +18,7 @@ const FINANCE_LOG_DOMAIN = "finance";
 const MAX_SYSTEM_AUDIT_LOGS = 20000;
 const ADJUSTMENT_NOTE_PREFIX = "[ĐIỀU CHỈNH]";
 const MAX_FINANCE_RECEIPT_DATA_URL_LENGTH = 4 * 1024 * 1024;
+const MAX_FINANCE_SUBCATEGORY_LENGTH = 80;
 const DEFAULT_FINANCE_EXPENSE_CATEGORIES = [
   { code: "ADS", name: "Ads" },
   { code: "OPERATIONS", name: "Vận hành" },
@@ -25,6 +26,10 @@ const DEFAULT_FINANCE_EXPENSE_CATEGORIES = [
 ];
 const FINANCE_TYPE_IN = "NHAP";
 const FINANCE_TYPE_OUT = "XUAT";
+const INVENTORY_AREA_WAREHOUSE = "KHO";
+const INVENTORY_AREA_SPA = "SPA";
+const INVENTORY_TYPE_IN = "NHAP";
+const INVENTORY_TYPE_OUT = "XUAT";
 let lastFinanceIntegrityAlertKey = "";
 
 const ADMIN_PERMISSIONS = {
@@ -39,6 +44,11 @@ const ADMIN_PERMISSIONS = {
   referrals: true,
   referralsEdit: true,
   referralsDelete: true,
+  inventory: true,
+  inventoryWarehouseIn: true,
+  inventoryWarehouseOut: true,
+  inventorySpaIn: true,
+  inventorySpaOut: true,
   finance: true,
   financeFund: true,
   reports: true,
@@ -116,6 +126,11 @@ function defaultMemberPermissions() {
     referrals: false,
     referralsEdit: false,
     referralsDelete: false,
+    inventory: false,
+    inventoryWarehouseIn: false,
+    inventoryWarehouseOut: false,
+    inventorySpaIn: false,
+    inventorySpaOut: false,
     finance: false,
     financeFund: false,
     reports: true,
@@ -142,6 +157,11 @@ function buildMemberPermissions(rawPermissions) {
     referrals: Boolean(source.referrals ?? defaults.referrals),
     referralsEdit: Boolean(source.referralsEdit ?? defaults.referralsEdit),
     referralsDelete: Boolean(source.referralsDelete ?? defaults.referralsDelete),
+    inventory: Boolean(source.inventory ?? defaults.inventory),
+    inventoryWarehouseIn: Boolean(source.inventoryWarehouseIn ?? defaults.inventoryWarehouseIn),
+    inventoryWarehouseOut: Boolean(source.inventoryWarehouseOut ?? defaults.inventoryWarehouseOut),
+    inventorySpaIn: Boolean(source.inventorySpaIn ?? defaults.inventorySpaIn),
+    inventorySpaOut: Boolean(source.inventorySpaOut ?? defaults.inventorySpaOut),
     finance: Boolean(source.finance ?? defaults.finance),
     financeFund: Boolean(source.financeFund ?? defaults.financeFund),
     reports: Boolean(source.reports ?? defaults.reports),
@@ -154,6 +174,24 @@ function buildMemberPermissions(rawPermissions) {
 
 function normalizeTextValue(value) {
   return String(value || "").trim();
+}
+
+function normalizeInventoryArea(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (normalized === INVENTORY_AREA_WAREHOUSE) return INVENTORY_AREA_WAREHOUSE;
+  if (normalized === INVENTORY_AREA_SPA) return INVENTORY_AREA_SPA;
+  return "";
+}
+
+function normalizeInventoryType(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (normalized === INVENTORY_TYPE_IN) return INVENTORY_TYPE_IN;
+  if (normalized === INVENTORY_TYPE_OUT) return INVENTORY_TYPE_OUT;
+  return "";
 }
 
 function isAdjustmentNote(note) {
@@ -186,6 +224,19 @@ function normalizeFinanceExpenseCategory(value) {
     .replace(/^_+|_+$/g, "")
     .slice(0, 60);
   return normalized;
+}
+
+function normalizeFinanceSubCategory(value) {
+  return normalizeTextValue(value).slice(0, MAX_FINANCE_SUBCATEGORY_LENGTH);
+}
+
+function extractFinanceSubCategoryFromNote(note) {
+  const raw = String(note || "");
+  if (!raw.trim()) return "";
+  const match =
+    raw.match(/(?:^|\|)\s*hạng\s*mục\s*:\s*([^|\n\r]+)/i) || raw.match(/(?:^|\|)\s*hang\s*muc\s*:\s*([^|\n\r]+)/i);
+  if (!match) return "";
+  return normalizeFinanceSubCategory(match[1]);
 }
 
 function findFinanceCategory(categories, code) {
@@ -598,6 +649,74 @@ function normalizeAllRecords(state) {
         .filter((item) => item.referredCustomerId && item.productId && item.date && item.revenue > 0)
     : [];
 
+  state.inventoryTransactions = Array.isArray(state.inventoryTransactions)
+    ? state.inventoryTransactions
+        .filter((item) => item && typeof item === "object")
+        .map((item) => {
+          const itemName =
+            typeof item.itemName === "string"
+              ? item.itemName.trim()
+              : typeof item.name === "string"
+                ? item.name.trim()
+                : "";
+          const area = normalizeInventoryArea(item.area || item.zone || item.location);
+          const type = normalizeInventoryType(item.type);
+          const quantity = Number(item.quantity || item.amount || 0);
+          const note = typeof item.note === "string" ? item.note : "";
+          const date = typeof item.date === "string" ? item.date.trim() : "";
+          const createdBy =
+            typeof item.createdBy === "string"
+              ? item.createdBy
+              : typeof item.created_by === "string"
+                ? item.created_by
+                : "";
+          const createdAt =
+            typeof item.createdAt === "string"
+              ? item.createdAt
+              : typeof item.timestamp === "string"
+                ? item.timestamp
+                : new Date().toISOString();
+          const transferId =
+            typeof item.transferId === "string"
+              ? item.transferId
+              : typeof item.transfer_id === "string"
+                ? item.transfer_id
+                : "";
+          const transferRoleRaw =
+            typeof item.transferRole === "string"
+              ? item.transferRole
+              : typeof item.transfer_role === "string"
+                ? item.transfer_role
+                : "";
+          const transferRoleNormalized = String(transferRoleRaw || "")
+            .trim()
+            .toUpperCase();
+          const transferRole = transferRoleNormalized === "IN" || transferRoleNormalized === "OUT" ? transferRoleNormalized : "";
+          const transferCounterpartyArea = normalizeInventoryArea(
+            item.transferCounterpartyArea || item.transfer_counterparty_area || item.counterpartyArea,
+          );
+
+          return {
+            id: typeof item.id === "string" && item.id ? item.id : createId("inv"),
+            itemName,
+            area,
+            type,
+            quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 0,
+            note,
+            date,
+            transferId,
+            transferRole,
+            transferCounterpartyArea,
+            createdBy,
+            created_by: createdBy,
+            createdAt,
+            timestamp: createdAt,
+          };
+        })
+        .filter((item) => item.itemName && item.area && item.type && isValidDay(item.date) && item.quantity > 0)
+        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+    : [];
+
   state.pushSubscriptions = Array.isArray(state.pushSubscriptions)
     ? state.pushSubscriptions
         .filter((item) => item && typeof item === "object")
@@ -714,17 +833,25 @@ function normalizeAllRecords(state) {
               : typeof item.timestamp === "string"
                 ? item.timestamp
                 : new Date().toISOString();
-          const adjustmentOf =
-            typeof item.adjustmentOf === "string"
-              ? item.adjustmentOf
-              : typeof item.adjustment_of === "string"
-                ? item.adjustment_of
-                : "";
           const transferId =
             typeof item.transferId === "string"
               ? item.transferId
               : typeof item.transfer_id === "string"
                 ? item.transfer_id
+                : "";
+          const rawSubCategory =
+            typeof item.subCategory === "string"
+              ? item.subCategory
+              : typeof item.sub_category === "string"
+                ? item.sub_category
+                : extractFinanceSubCategoryFromNote(rawNote);
+          const subCategory =
+            type === FINANCE_TYPE_OUT && !transferId ? normalizeFinanceSubCategory(rawSubCategory) : "";
+          const adjustmentOf =
+            typeof item.adjustmentOf === "string"
+              ? item.adjustmentOf
+              : typeof item.adjustment_of === "string"
+                ? item.adjustment_of
                 : "";
           const transferRoleRaw =
             typeof item.transferRole === "string"
@@ -754,6 +881,7 @@ function normalizeAllRecords(state) {
             type,
             amount: Number.isFinite(amount) && amount > 0 ? amount : 0,
             category,
+            subCategory,
             note,
             isAdjustment,
             adjustmentOf,
@@ -946,6 +1074,7 @@ function createInitialState() {
     products: [],
     visits: [],
     referrals: [],
+    inventoryTransactions: [],
     financeTransactions: [],
     financeExpenseCategories: [],
     financeCategoryReclassLogs: [],
@@ -972,6 +1101,7 @@ function readStateFromDisk() {
       products: Array.isArray(parsed.products) ? parsed.products : [],
       visits: Array.isArray(parsed.visits) ? parsed.visits : [],
       referrals: Array.isArray(parsed.referrals) ? parsed.referrals : [],
+      inventoryTransactions: Array.isArray(parsed.inventoryTransactions) ? parsed.inventoryTransactions : [],
       financeTransactions: Array.isArray(parsed.financeTransactions) ? parsed.financeTransactions : [],
       financeExpenseCategories: Array.isArray(parsed.financeExpenseCategories) ? parsed.financeExpenseCategories : [],
       financeCategoryReclassLogs: Array.isArray(parsed.financeCategoryReclassLogs) ? parsed.financeCategoryReclassLogs : [],
@@ -1180,6 +1310,14 @@ function getReferralsForClient(requestUser) {
   }
 
   return [];
+}
+
+function getInventoryTransactionsForClient(requestUser) {
+  if (!hasFeaturePermission(requestUser, "inventory")) {
+    return [];
+  }
+
+  return state.inventoryTransactions;
 }
 
 function getValidFinanceTransactions() {
@@ -1397,6 +1535,7 @@ function getBootstrapForUser(requestUser) {
     financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
     financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
     financeCategoryReclassLogs: clone(getFinanceCategoryReclassLogsForClient(requestUser)),
+    inventoryTransactions: clone(getInventoryTransactionsForClient(requestUser)),
     users: clone(getUsersForClient(requestUser)),
     financeIntegrity:
       requestUser.role === "admin"
@@ -1413,6 +1552,33 @@ function assertFeaturePermission(user, featureKey) {
   if (!hasFeaturePermission(user, featureKey)) {
     throw httpError(403, "Bạn không có quyền thực hiện thao tác này.");
   }
+}
+
+function canMutateInventoryByAreaAndType(user, area, type) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  if (!hasFeaturePermission(user, "inventory")) return false;
+
+  if (area === INVENTORY_AREA_WAREHOUSE && type === INVENTORY_TYPE_IN) {
+    return Boolean(user.permissions?.inventoryWarehouseIn);
+  }
+  if (area === INVENTORY_AREA_WAREHOUSE && type === INVENTORY_TYPE_OUT) {
+    return Boolean(user.permissions?.inventoryWarehouseOut);
+  }
+  if (area === INVENTORY_AREA_SPA && type === INVENTORY_TYPE_IN) {
+    return Boolean(user.permissions?.inventorySpaIn);
+  }
+  if (area === INVENTORY_AREA_SPA && type === INVENTORY_TYPE_OUT) {
+    return Boolean(user.permissions?.inventorySpaOut);
+  }
+
+  return false;
+}
+
+function assertInventoryMutationPermission(user, area, type) {
+  assertFeaturePermission(user, "inventory");
+  if (canMutateInventoryByAreaAndType(user, area, type)) return;
+  throw httpError(403, "Bạn chưa được cấp quyền thực hiện nhập/xuất cho khu vực này.");
 }
 
 function canEditCustomerInfo(user) {
@@ -1646,6 +1812,152 @@ function deleteProduct(requestUser, productId) {
     deletedProductId: productId,
     deletedProductName: product.name,
     products: clone(state.products),
+  };
+}
+
+function addInventoryTransaction(requestUser, input) {
+  assertFeaturePermission(requestUser, "inventory");
+
+  const itemName = typeof input?.itemName === "string" ? input.itemName.trim() : "";
+  const area = normalizeInventoryArea(input?.area);
+  const type = normalizeInventoryType(input?.type);
+  const quantity = Number(input?.quantity || 0);
+  const note = typeof input?.note === "string" ? input.note : "";
+  const date = typeof input?.date === "string" ? input.date.trim() : "";
+  const transferTargetArea = normalizeInventoryArea(input?.transferTargetArea || input?.transferToArea || "");
+
+  if (!itemName || !area || !type || !isValidDay(date) || !Number.isFinite(quantity) || quantity <= 0) {
+    throw httpError(400, "Vui lòng nhập đầy đủ tên hàng, khu vực, loại giao dịch, ngày hợp lệ và số lượng > 0.");
+  }
+
+  if (area !== INVENTORY_AREA_WAREHOUSE && type === INVENTORY_TYPE_IN) {
+    throw httpError(400, "Ngoài kho, khu vực chỉ được xuất. Nhập sẽ đi từ kho xuất.");
+  }
+
+  if (transferTargetArea && !(area === INVENTORY_AREA_WAREHOUSE && type === INVENTORY_TYPE_OUT)) {
+    throw httpError(400, "Chỉ giao dịch Kho xuất mới được chọn khu vực nhận.");
+  }
+
+  if (transferTargetArea && transferTargetArea === INVENTORY_AREA_WAREHOUSE) {
+    throw httpError(400, "Khu vực nhận phải khác Kho.");
+  }
+
+  assertInventoryMutationPermission(requestUser, area, type);
+  if (transferTargetArea && !canMutateInventoryByAreaAndType(requestUser, transferTargetArea, INVENTORY_TYPE_IN)) {
+    throw httpError(403, "Bạn chưa được cấp quyền nhập cho khu vực nhận hàng.");
+  }
+
+  const nowIso = new Date().toISOString();
+  const transferId = transferTargetArea ? createId("invtf") : "";
+  const transaction = {
+    id: createId("inv"),
+    itemName,
+    area,
+    type,
+    quantity,
+    note,
+    date,
+    transferId,
+    transferRole: transferTargetArea ? "OUT" : "",
+    transferCounterpartyArea: transferTargetArea || "",
+    createdBy: requestUser.id,
+    created_by: requestUser.id,
+    createdAt: nowIso,
+    timestamp: nowIso,
+  };
+
+  let linkedInTransaction = null;
+  if (transferTargetArea) {
+    linkedInTransaction = {
+      id: createId("inv"),
+      itemName,
+      area: transferTargetArea,
+      type: INVENTORY_TYPE_IN,
+      quantity,
+      note: note ? `[Từ kho] ${note}` : "[Từ kho]",
+      date,
+      transferId,
+      transferRole: "IN",
+      transferCounterpartyArea: INVENTORY_AREA_WAREHOUSE,
+      createdBy: requestUser.id,
+      created_by: requestUser.id,
+      createdAt: nowIso,
+      timestamp: nowIso,
+    };
+    state.inventoryTransactions.unshift(linkedInTransaction);
+  }
+
+  state.inventoryTransactions.unshift(transaction);
+  persist();
+
+  return {
+    transaction: clone(transaction),
+    linkedTransaction: linkedInTransaction ? clone(linkedInTransaction) : null,
+    inventoryTransactions: clone(getInventoryTransactionsForClient(requestUser)),
+  };
+}
+
+function updateInventoryTransaction(requestUser, transactionId, input) {
+  assertFeaturePermission(requestUser, "inventory");
+  if (requestUser.role !== "admin") {
+    throw httpError(403, "Chỉ quản trị viên mới có quyền chỉnh sửa lịch sử kho/spa.");
+  }
+
+  const targetId = typeof transactionId === "string" ? transactionId.trim() : "";
+  if (!targetId) {
+    throw httpError(400, "Thiếu mã giao dịch cần chỉnh sửa.");
+  }
+
+  const transaction = state.inventoryTransactions.find((item) => item.id === targetId);
+  if (!transaction) {
+    throw httpError(404, "Không tìm thấy giao dịch kho/spa.");
+  }
+
+  const itemName = typeof input?.itemName === "string" ? input.itemName.trim() : "";
+  const quantity = Number(input?.quantity || 0);
+  const date = typeof input?.date === "string" ? input.date.trim() : "";
+  const note = typeof input?.note === "string" ? input.note.trim() : "";
+
+  if (!itemName || !isValidDay(date) || !Number.isFinite(quantity) || quantity <= 0) {
+    throw httpError(400, "Vui lòng nhập tên hàng, ngày hợp lệ và số lượng > 0.");
+  }
+
+  const transferId = typeof transaction.transferId === "string" ? transaction.transferId.trim() : "";
+  const formatNoteByRole = (role, rawNote) => {
+    const normalizedRole = String(role || "")
+      .trim()
+      .toUpperCase();
+    if (normalizedRole === "IN") {
+      return rawNote ? `[Từ kho] ${rawNote}` : "[Từ kho]";
+    }
+    return rawNote;
+  };
+  const applyToRow = (row) => {
+    row.itemName = itemName;
+    row.quantity = quantity;
+    row.date = date;
+    row.note = formatNoteByRole(row.transferRole, note);
+  };
+
+  if (!transferId) {
+    applyToRow(transaction);
+  } else {
+    let hasApplied = false;
+    state.inventoryTransactions.forEach((item) => {
+      if (typeof item.transferId !== "string" || item.transferId.trim() !== transferId) return;
+      applyToRow(item);
+      hasApplied = true;
+    });
+    if (!hasApplied) {
+      applyToRow(transaction);
+    }
+  }
+
+  persist();
+
+  return {
+    transaction: clone(transaction),
+    inventoryTransactions: clone(getInventoryTransactionsForClient(requestUser)),
   };
 }
 
@@ -1896,6 +2208,13 @@ function addFinanceTransaction(requestUser, input) {
   const category = resolveFinanceExpenseCategoryCode(input?.category, state.financeExpenseCategories, {
     allowInactive: false,
   });
+  const rawSubCategory =
+    typeof input?.subCategory === "string"
+      ? input.subCategory
+      : typeof input?.sub_category === "string"
+        ? input.sub_category
+        : "";
+  const subCategory = normalizeFinanceSubCategory(rawSubCategory);
   const rawNote = typeof input?.note === "string" ? input.note : "";
   const requestedUserId = typeof input?.userId === "string" ? input.userId : "";
   const requestedAdjustmentOf = typeof input?.adjustmentOf === "string" ? input.adjustmentOf.trim() : "";
@@ -2016,6 +2335,7 @@ function addFinanceTransaction(requestUser, input) {
       type: payload.type,
       amount,
       category: payload.category || "",
+      subCategory: payload.subCategory || "",
       note: payload.note || "",
       isAdjustment: Boolean(payload.isAdjustment),
       adjustmentOf: payload.adjustmentOf || "",
@@ -2044,6 +2364,7 @@ function addFinanceTransaction(requestUser, input) {
         userId: transferTargetUserId,
         type: FINANCE_TYPE_IN,
         category: "",
+        subCategory: "",
         note,
         isAdjustment: false,
         adjustmentOf: "",
@@ -2058,6 +2379,7 @@ function addFinanceTransaction(requestUser, input) {
         userId: requestUser.id,
         type: FINANCE_TYPE_OUT,
         category: "",
+        subCategory: "",
         note,
         isAdjustment: false,
         adjustmentOf: "",
@@ -2094,6 +2416,7 @@ function addFinanceTransaction(requestUser, input) {
         userId: walletUserId,
         type,
         category: type === FINANCE_TYPE_OUT ? category : "",
+        subCategory: type === FINANCE_TYPE_OUT ? subCategory : "",
         note,
         isAdjustment,
         adjustmentOf,
@@ -2119,6 +2442,7 @@ function addFinanceTransaction(requestUser, input) {
         type,
         amount,
         category: transaction.category || "",
+        subCategory: transaction.subCategory || "",
         note,
         isAdjustment,
         adjustmentOf: adjustmentOf || "",
@@ -2148,7 +2472,10 @@ function updateFinanceTransaction(requestUser, transactionId, input) {
   const hasNote = Object.prototype.hasOwnProperty.call(patchInput, "note");
   const hasDate = Object.prototype.hasOwnProperty.call(patchInput, "transactionDate");
   const hasCategory = Object.prototype.hasOwnProperty.call(patchInput, "category");
-  if (!hasAmount && !hasNote && !hasDate && !hasCategory) {
+  const hasSubCategory =
+    Object.prototype.hasOwnProperty.call(patchInput, "subCategory") ||
+    Object.prototype.hasOwnProperty.call(patchInput, "sub_category");
+  if (!hasAmount && !hasNote && !hasDate && !hasCategory && !hasSubCategory) {
     throw httpError(400, "Vui lòng cung cấp ít nhất một trường cần cập nhật.");
   }
 
@@ -2176,6 +2503,15 @@ function updateFinanceTransaction(requestUser, transactionId, input) {
   if (shouldAdjust) {
     nextNote = normalizeAdjustmentNote(nextNote);
   }
+  const nextSubCategory = normalizeFinanceSubCategory(
+    hasSubCategory
+      ? typeof patchInput.subCategory === "string"
+        ? patchInput.subCategory
+        : typeof patchInput.sub_category === "string"
+          ? patchInput.sub_category
+          : ""
+      : transaction.subCategory || "",
+  );
 
   const baseType = normalizeFinanceTransactionType(transaction.type);
   if (!baseType) {
@@ -2189,8 +2525,8 @@ function updateFinanceTransaction(requestUser, transactionId, input) {
   let removedReclassCount = 0;
 
   if (isInternalTransfer) {
-    if (hasCategory) {
-      throw httpError(400, "Giao dịch chuyển nội bộ không hỗ trợ chỉnh danh mục.");
+    if (hasCategory || hasSubCategory) {
+      throw httpError(400, "Giao dịch chuyển nội bộ không hỗ trợ chỉnh danh mục hoặc hạng mục.");
     }
 
     const counterpart = state.financeTransactions.find(
@@ -2213,6 +2549,7 @@ function updateFinanceTransaction(requestUser, transactionId, input) {
     transaction.timestamp = nextCreatedAt;
     transaction.isAdjustment = false;
     transaction.category = "";
+    transaction.subCategory = "";
     transaction.receiptImageDataUrl = "";
     transaction.receiptImageName = "";
 
@@ -2222,6 +2559,7 @@ function updateFinanceTransaction(requestUser, transactionId, input) {
     counterpart.timestamp = nextCreatedAt;
     counterpart.isAdjustment = false;
     counterpart.category = "";
+    counterpart.subCategory = "";
     counterpart.receiptImageDataUrl = "";
     counterpart.receiptImageName = "";
   } else {
@@ -2241,6 +2579,9 @@ function updateFinanceTransaction(requestUser, transactionId, input) {
     } else if (hasCategory) {
       throw httpError(400, "Giao dịch NHẬP không hỗ trợ chỉnh danh mục.");
     }
+    if (baseType === FINANCE_TYPE_IN && hasSubCategory) {
+      throw httpError(400, "Giao dịch NHẬP không hỗ trợ chỉnh hạng mục.");
+    }
 
     transaction.amount = nextAmount;
     transaction.note = nextNote;
@@ -2248,6 +2589,7 @@ function updateFinanceTransaction(requestUser, transactionId, input) {
     transaction.timestamp = nextCreatedAt;
     transaction.isAdjustment = shouldAdjust;
     transaction.category = baseType === FINANCE_TYPE_OUT ? nextCategory : "";
+    transaction.subCategory = baseType === FINANCE_TYPE_OUT ? nextSubCategory : "";
     transaction.receiptImageDataUrl = baseType === FINANCE_TYPE_OUT ? transaction.receiptImageDataUrl || "" : "";
     transaction.receiptImageName = baseType === FINANCE_TYPE_OUT ? transaction.receiptImageName || "" : "";
 
@@ -2838,6 +3180,8 @@ module.exports = {
   addProduct,
   updateProduct,
   deleteProduct,
+  addInventoryTransaction,
+  updateInventoryTransaction,
   addReferral,
   updateReferral,
   deleteReferral,

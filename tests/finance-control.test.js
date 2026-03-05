@@ -175,6 +175,65 @@ describe('Tài chính', () => {
     expect(reportSummaryText).toContain('Số giao dịch 1');
   });
 
+  it('supports sub-category field for expense transactions', () => {
+    ctx = bootApp();
+
+    login(ctx, 'admin', 'admin123');
+    createMember(ctx, {
+      fullName: 'Nhân viên hạng mục',
+      username: '0900000177',
+      password: '123456',
+    });
+
+    updateMemberPermissions(ctx, '0900000177', {
+      customers: false,
+      customerEdit: false,
+      products: false,
+      productsEdit: false,
+      productsDelete: false,
+      visits: false,
+      visitsEdit: false,
+      visitsDelete: false,
+      referrals: false,
+      referralsEdit: false,
+      referralsDelete: false,
+      finance: true,
+      dataCleanup: false,
+      backupData: false,
+      changePassword: false,
+      reports: true,
+      reportsAll: false,
+    });
+
+    addFinanceTransaction(ctx, {
+      type: 'NHAP',
+      amount: 500000,
+      note: 'Nạp quỹ ban đầu',
+    });
+    addFinanceTransaction(ctx, {
+      type: 'XUAT',
+      targetUsername: '0900000177',
+      amount: 300000,
+      note: 'Cấp quỹ cho nhân viên',
+    });
+
+    logout(ctx);
+    login(ctx, '0900000177', '123456');
+
+    const createMessage = addFinanceTransaction(ctx, {
+      type: 'XUAT',
+      amount: 120000,
+      subCategory: 'Nhân sự',
+      note: 'Ăn trưa team',
+    });
+    expect(createMessage).toContain('Đã ghi nhận XUẤT');
+
+    openTab(ctx, 'finance');
+    const tableText = textOf(byId(ctx, 'finance-table-body'));
+    expect(tableText).toContain('Nhân sự');
+    expect(textOf(byId(ctx, 'finance-report-category-body'))).toContain('Nhân sự');
+  });
+
   it('allows delegated finance funding permission for non-admin accounts', () => {
     ctx = bootApp();
 
@@ -570,12 +629,11 @@ describe('Tài chính', () => {
     expect(deleteBtn).toBeTruthy();
 
     click(editBtn);
-    expect(textOf(byId(ctx, 'finance-result'))).toContain('Đang sửa giao dịch');
-    setValue(byId(ctx, 'finance-amount'), '80000');
-    setValue(byId(ctx, 'finance-date'), '2026-02-20');
-    setValue(byId(ctx, 'finance-category'), 'OPERATIONS');
-    setValue(byId(ctx, 'finance-note'), 'Chi da sua boi admin');
-    submit(byId(ctx, 'finance-form'));
+    setValue(byId(ctx, 'finance-inline-edit-amount'), '80000');
+    setValue(byId(ctx, 'finance-inline-edit-date'), '2026-02-20');
+    setValue(byId(ctx, 'finance-inline-edit-category'), 'OPERATIONS');
+    setValue(byId(ctx, 'finance-inline-edit-note'), 'Chi da sua boi admin');
+    click(byId(ctx, 'finance-inline-save-edit-btn'));
 
     const editedHistoryText = textOf(byId(ctx, 'finance-table-body'));
     expect(editedHistoryText).toContain('Chi da sua boi admin');
@@ -664,13 +722,14 @@ describe('Tài chính', () => {
 
     const expenseRow = getDataRows(ctx, 'finance-table-body').find((row) => row.textContent.includes('Chi ads ban dau'));
     expect(expenseRow).toBeTruthy();
-    const reclassButton = expenseRow.querySelector('.finance-reclass-open-btn');
-    expect(reclassButton).toBeTruthy();
-    click(reclassButton);
+    expect(expenseRow.querySelector('.finance-reclass-open-btn')).toBeNull();
 
-    setValue(byId(ctx, 'finance-reclass-category'), 'OPERATIONS');
-    setValue(byId(ctx, 'finance-reclass-reason'), 'Phan loai lai chi phi');
-    click(byId(ctx, 'finance-reclass-submit-btn'));
+    const editButton = expenseRow.querySelector('.finance-edit-transaction-btn');
+    expect(editButton).toBeTruthy();
+    click(editButton);
+
+    setValue(byId(ctx, 'finance-inline-edit-category'), 'OPERATIONS');
+    click(byId(ctx, 'finance-inline-save-edit-btn'));
 
     const afterSummaryText = textOf(byId(ctx, 'finance-summary'));
     const afterRowCount = getDataRows(ctx, 'finance-table-body').length;

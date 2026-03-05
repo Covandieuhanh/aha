@@ -469,7 +469,7 @@ function deleteReferral(ctx, referredCustomerName) {
   return textOf(byId(ctx, 'referral-result'));
 }
 
-function addFinanceTransaction(ctx, { type, amount, note = '', targetUsername = '', transactionDate = '' }) {
+function addFinanceTransaction(ctx, { type, amount, note = '', targetUsername = '', transactionDate = '', subCategory = '' }) {
   openTab(ctx, 'finance');
   const openBtn = ctx.document.getElementById('finance-open-expense-btn');
   if (openBtn && !openBtn.classList.contains('hidden')) {
@@ -497,9 +497,34 @@ function addFinanceTransaction(ctx, { type, amount, note = '', targetUsername = 
   } else {
     setValue(byId(ctx, 'finance-date'), '');
   }
+  const subCategoryInput = ctx.document.getElementById('finance-subcategory');
+  if (subCategoryInput && !subCategoryInput.disabled) {
+    setValue(subCategoryInput, subCategory);
+  }
   setValue(byId(ctx, 'finance-note'), note);
   submit(byId(ctx, 'finance-form'));
   return textOf(byId(ctx, 'finance-result'));
+}
+
+function addInventoryTransaction(
+  ctx,
+  { area = 'KHO', type = 'NHAP', itemName, quantity, date = '', note = '', transferTargetArea = '' },
+) {
+  openTab(ctx, 'inventory');
+  setValue(byId(ctx, 'inventory-area'), area);
+  setValue(byId(ctx, 'inventory-type'), type);
+  const transferInput = byId(ctx, 'inventory-transfer-target-area');
+  if (transferInput) {
+    setValue(transferInput, transferTargetArea);
+  }
+  setValue(byId(ctx, 'inventory-item-name'), itemName);
+  setValue(byId(ctx, 'inventory-quantity'), String(quantity));
+  if (date) {
+    setValue(byId(ctx, 'inventory-date'), date);
+  }
+  setValue(byId(ctx, 'inventory-note'), note);
+  submit(byId(ctx, 'inventory-form'));
+  return textOf(byId(ctx, 'inventory-result'));
 }
 
 function getDataRows(ctx, tbodyId) {
@@ -515,6 +540,7 @@ function getRowTexts(ctx, tbodyId) {
 module.exports = {
   addReferral,
   addFinanceTransaction,
+  addInventoryTransaction,
   addVisit,
   bootApp,
   byId,

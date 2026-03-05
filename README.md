@@ -23,7 +23,8 @@
   - Các quyền chi tiết gồm: `Thông tin khách hàng`, `Sửa thông tin khách hàng`, `Sản phẩm dịch vụ`,
     `Sửa sản phẩm dịch vụ`, `Xoá sản phẩm dịch vụ`, `Tích điểm voucher`, `Sửa tích điểm voucher`,
     `Xoá tích điểm voucher`, `Hoa hồng giới thiệu`, `Sửa hoa hồng giới thiệu`, `Xoá hoa hồng giới thiệu`,
-    `Quản trị dữ liệu theo khoảng thời gian`, `Sao lưu dữ liệu`, `Thay đổi mật khẩu`, `Báo cáo chi tiết`.
+    `Quản lý kho`, `Nhập kho`, `Xuất kho`, `Nhập spa`, `Xuất spa`, `Quản trị dữ liệu theo khoảng thời gian`,
+    `Sao lưu dữ liệu`, `Thay đổi mật khẩu`, `Báo cáo chi tiết`.
 - Tài khoản nhân viên:
   - Mặc định khi tạo mới: chỉ có quyền tab `Báo cáo chi tiết`.
   - Chỉ thấy các tab được admin cấp.
@@ -37,9 +38,12 @@
 3. `Tích điểm voucher`: ghi nhận lượt khách tới Aha và tự tính voucher theo số lần trong tháng.
 4. `Hoa hồng giới thiệu`: ghi nhận giao dịch giới thiệu và tự tính hoa hồng theo số lần trong tháng.
 5. `Báo cáo chi tiết`: xem lịch sử hoa hồng.
-6. `Quản trị dữ liệu theo khoảng thời gian`: xoá dữ liệu theo phạm vi ngày và loại dữ liệu.
-7. `Thay đổi mật khẩu`: đổi mật khẩu cho chính tài khoản đang đăng nhập (khi có quyền).
-8. `Tài khoản thành viên`: chỉ quản trị viên thấy và thao tác.
+6. `Tài chính`: quản lý ví nội bộ NHẬP/XUẤT theo nhân viên.
+7. `Quản lý kho`: `Kho` là nguồn gốc, `Spa` là nhánh. `Spa` không nhập trực tiếp; chỉ tăng tồn qua luồng
+   `Kho xuất -> Spa nhập` (tự động). Hệ thống tổng hợp báo cáo nhập/xuất/tồn theo mặt hàng cho cả 2 khu vực.
+8. `Quản trị dữ liệu theo khoảng thời gian`: xoá dữ liệu theo phạm vi ngày và loại dữ liệu.
+9. `Thay đổi mật khẩu`: đổi mật khẩu cho chính tài khoản đang đăng nhập (khi có quyền).
+10. `Tài khoản thành viên`: chỉ quản trị viên thấy và thao tác.
 
 ## Nhập / Xuất dữ liệu khách hàng
 

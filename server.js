@@ -15,6 +15,8 @@ const {
   addProduct,
   updateProduct,
   deleteProduct,
+  addInventoryTransaction,
+  updateInventoryTransaction,
   addReferral,
   addFinanceTransaction,
   updateFinanceTransaction,
@@ -293,6 +295,24 @@ app.delete("/api/products/:id", requireAuth, (req, res) => {
     res.json(deleted);
   } catch (error) {
     sendApiError(res, error, "Không thể xoá sản phẩm/dịch vụ.");
+  }
+});
+
+app.post("/api/inventory/transactions", requireAuth, (req, res) => {
+  try {
+    const payload = addInventoryTransaction(req.user, req.body);
+    res.status(201).json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể ghi nhận giao dịch kho/spa.");
+  }
+});
+
+app.patch("/api/inventory/transactions/:id", requireAuth, (req, res) => {
+  try {
+    const payload = updateInventoryTransaction(req.user, req.params.id, req.body);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể cập nhật giao dịch kho/spa.");
   }
 });
 

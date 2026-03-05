@@ -72,22 +72,32 @@
             <option value="visits">Giao dịch dịch vụ</option>
             <option value="reports">Báo cáo chi tiết</option>
             <option value="finance">Tài chính</option>
-            <option value="maintenance">Quản trị dữ liệu theo khoảng thời gian</option>
+            <option value="inventory">Quản lý kho</option>
+            <option value="maintenance">Quản trị dữ liệu</option>
+            <option value="users">Tài khoản nhân viên</option>
             <option value="account">Thay đổi mật khẩu</option>
-            <option value="users">Tài khoản thành viên</option>
           </select>
         </div>
 
+        <nav class="tab-groups" aria-label="Nhóm chức năng">
+          <button class="tab-group-btn" data-tab-group="data">Dữ liệu</button>
+          <button class="tab-group-btn" data-tab-group="transactions">Giao dịch</button>
+          <button class="tab-group-btn" data-tab-group="finance">Tài chính</button>
+          <button class="tab-group-btn" data-tab-group="inventory">Quản lý kho</button>
+          <button class="tab-group-btn" data-tab-group="accounts">Tài khoản</button>
+        </nav>
+
         <nav class="tabs" aria-label="Các mục quản trị">
-          <button class="tab-btn" data-tab="customers" data-feature="customers">Thông tin khách hàng</button>
-          <button class="tab-btn" data-tab="products" data-feature="products">Sản phẩm dịch vụ</button>
-          <button class="tab-btn" data-tab="visits" data-feature="visits">Giao dịch dịch vụ</button>
-          <button class="tab-btn hidden" data-tab="referrals" data-feature="referrals">Hoa hồng giới thiệu</button>
-          <button class="tab-btn" data-tab="reports" data-feature="reports">Báo cáo chi tiết</button>
-          <button class="tab-btn" data-tab="finance" data-feature="finance">Tài chính</button>
-          <button class="tab-btn" data-tab="maintenance" data-feature="dataCleanup">Quản trị dữ liệu theo khoảng thời gian</button>
-          <button class="tab-btn" data-tab="account" data-feature="changePassword">Thay đổi mật khẩu</button>
-          <button class="tab-btn" data-tab="users" data-feature="manageUsers">Tài khoản thành viên</button>
+          <button class="tab-btn" data-tab="customers" data-tab-group="data" data-feature="customers">Thông tin khách hàng</button>
+          <button class="tab-btn" data-tab="products" data-tab-group="data" data-feature="products">Sản phẩm dịch vụ</button>
+          <button class="tab-btn" data-tab="visits" data-tab-group="transactions" data-feature="visits">Giao dịch dịch vụ</button>
+          <button class="tab-btn hidden" data-tab="referrals" data-tab-group="transactions" data-feature="referrals">Hoa hồng giới thiệu</button>
+          <button class="tab-btn" data-tab="reports" data-tab-group="transactions" data-feature="reports">Báo cáo chi tiết</button>
+          <button class="tab-btn" data-tab="finance" data-tab-group="finance" data-feature="finance">Tài chính</button>
+          <button class="tab-btn" data-tab="inventory" data-tab-group="inventory" data-feature="inventory">Quản lý kho</button>
+          <button class="tab-btn" data-tab="maintenance" data-tab-group="data" data-feature="dataCleanup">Quản trị dữ liệu</button>
+          <button class="tab-btn" data-tab="users" data-tab-group="accounts" data-feature="manageUsers">Tài khoản nhân viên</button>
+          <button class="tab-btn" data-tab="account" data-tab-group="accounts" data-feature="changePassword">Thay đổi mật khẩu</button>
         </nav>
 
         <section id="no-permission" class="card no-permission hidden">
@@ -97,12 +107,12 @@
 
         <section class="tab-panel" id="tab-customers">
           <div class="panel-grid">
-            <article class="card">
+            <article class="card customer-entry-card">
               <h2>Nhập khách hàng</h2>
               <p class="card-desc">
                 Nhân viên chỉ được sửa khách hàng khi quản trị viên cấp thêm quyền `Sửa thông tin khách hàng`.
               </p>
-              <form id="customer-form" class="form-grid">
+              <form id="customer-form" class="form-grid customer-form-grid">
                 <label>
                   Họ và tên
                   <input type="text" id="customer-name" required placeholder="Ví dụ: Nguyễn Văn A" />
@@ -142,7 +152,7 @@
               </div>
             </article>
 
-            <article class="card">
+            <article class="card customer-list-card">
               <h2>Danh sách khách hàng</h2>
               <div class="table-controls">
                 <input type="search" id="customer-search" placeholder="Tìm khách theo tên, điện thoại, email, ghi chú" />
@@ -496,6 +506,10 @@
                   </select>
                 </label>
                 <label>
+                  Hạng mục (chi tiết)
+                  <input type="text" id="finance-subcategory" maxlength="80" placeholder="Ví dụ: Nhân sự" />
+                </label>
+                <label>
                   Ghi chú
                   <textarea
                     id="finance-note"
@@ -581,7 +595,7 @@
                   <tbody id="finance-report-table-body"></tbody>
                 </table>
               </div>
-              <h3>Thống kê xuất theo danh mục</h3>
+              <h3>Thống kê xuất theo danh mục / hạng mục</h3>
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -677,6 +691,142 @@
           </div>
         </section>
 
+        <section class="tab-panel" id="tab-inventory">
+          <div class="panel-grid">
+            <article class="card">
+              <h2>Quản lý kho / spa (tách khu vực)</h2>
+              <p class="card-desc">
+                `Kho` là nguồn gốc. Khu vực khác chỉ được `Xuất`; dữ liệu `Nhập` của khu vực khác sẽ đi từ `Kho xuất`.
+              </p>
+              <div class="inventory-view-switch" role="group" aria-label="Chọn khu vực quản lý">
+                <button type="button" id="inventory-view-warehouse-btn" class="secondary-btn inventory-view-btn">Quản lý Kho</button>
+                <button type="button" id="inventory-view-spa-btn" class="secondary-btn inventory-view-btn">Quản lý Spa</button>
+              </div>
+              <p id="inventory-view-desc" class="card-desc inventory-view-desc"></p>
+              <form id="inventory-form" class="form-grid">
+                <label class="hidden">
+                  Khu vực
+                  <select id="inventory-area" required>
+                    <option value="KHO">Kho</option>
+                    <option value="SPA">Spa</option>
+                  </select>
+                </label>
+                <label>
+                  Loại giao dịch
+                  <select id="inventory-type" required>
+                    <option value="NHAP">NHẬP</option>
+                    <option value="XUAT">XUẤT</option>
+                  </select>
+                </label>
+                <label>
+                  Tên hàng
+                  <input
+                    type="text"
+                    id="inventory-item-name"
+                    list="inventory-item-options"
+                    required
+                    placeholder="Ví dụ: GEL XANH"
+                  />
+                  <datalist id="inventory-item-options"></datalist>
+                </label>
+                <label>
+                  Số lượng
+                  <input type="number" id="inventory-quantity" min="0.001" step="0.001" required placeholder="Ví dụ: 2" />
+                </label>
+                <label>
+                  Ngày giao dịch
+                  <input type="date" id="inventory-date" required />
+                </label>
+                <label>
+                  Ghi chú
+                  <input type="text" id="inventory-note" placeholder="Ghi chú thêm (tuỳ chọn)" />
+                </label>
+                <label id="inventory-transfer-wrap" class="hidden">
+                  Khu vực nhận hàng (từ kho)
+                  <select id="inventory-transfer-target-area">
+                    <option value="">Không chuyển khu vực</option>
+                    <option value="SPA">Spa</option>
+                  </select>
+                </label>
+                <div class="form-actions">
+                  <button type="submit" id="inventory-submit-btn" class="primary-btn">Lưu giao dịch kho/spa</button>
+                </div>
+              </form>
+              <div id="inventory-result" class="result-box"></div>
+            </article>
+
+            <article class="card">
+              <h2 id="inventory-stock-title">Tồn kho theo mặt hàng</h2>
+              <div id="inventory-summary" class="summary-row"></div>
+              <div class="table-wrap" id="inventory-stock-warehouse-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th colspan="4">Khu vực Kho</th>
+                    </tr>
+                    <tr>
+                      <th>Tên hàng</th>
+                      <th>Tổng nhập</th>
+                      <th>Tổng xuất</th>
+                      <th>Tồn</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inventory-stock-warehouse-body"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap" id="inventory-stock-spa-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th colspan="4">Khu vực Spa</th>
+                    </tr>
+                    <tr>
+                      <th>Tên hàng</th>
+                      <th>Tổng nhập</th>
+                      <th>Tổng xuất</th>
+                      <th>Tồn</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inventory-stock-spa-body"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="card inventory-history-card">
+              <div class="card-head-inline">
+                <h2 id="inventory-history-title">Lịch sử giao dịch</h2>
+                <label class="inline-filter hidden">
+                  Khu vực
+                  <select id="inventory-filter-area">
+                    <option value="">Tất cả</option>
+                    <option value="KHO">Kho</option>
+                    <option value="SPA">Spa</option>
+                  </select>
+                </label>
+                <input type="search" id="inventory-search" class="inline-search" placeholder="Tìm theo tên hàng / ghi chú" />
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ngày</th>
+                      <th>Khu vực</th>
+                      <th>Loại</th>
+                      <th>Tên hàng</th>
+                      <th>Số lượng</th>
+                      <th>Luồng</th>
+                      <th>Người tạo</th>
+                      <th>Ghi chú</th>
+                      <th>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inventory-table-body"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section class="tab-panel" id="tab-maintenance">
           <div class="panel-grid">
             <article class="card">
@@ -758,7 +908,7 @@
 
         <section class="tab-panel" id="tab-users">
           <div class="panel-grid">
-            <article class="card">
+            <article class="card user-create-card">
               <h2>Tạo tài khoản thành viên</h2>
               <form id="member-form" class="form-grid">
                 <label>
@@ -825,6 +975,26 @@
                         <input type="checkbox" id="perm-finance-fund" />
                         Cấp tiền cho nhân viên
                       </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-inventory" />
+                        Quản lý kho
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-inventory-warehouse-in" />
+                        Nhập kho
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-inventory-warehouse-out" />
+                        Xuất kho
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-inventory-spa-in" />
+                        Nhập spa
+                      </label>
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="perm-inventory-spa-out" />
+                        Xuất spa
+                      </label>
                     </section>
 
                     <section class="permission-subgroup">
@@ -880,15 +1050,15 @@
               <div id="member-form-result" class="result-box"></div>
             </article>
 
-            <article class="card">
+            <article class="card user-list-card">
               <h2>Danh sách tài khoản</h2>
               <p class="card-desc">
                 Quản trị viên có thể thêm hoặc xoá quyền cho từng tài khoản nhân viên rồi bấm lưu để cập nhật. Quyền
                 `Giao dịch dịch vụ` đã bao gồm cả voucher và hoa hồng trong cùng một thao tác nhập. Quyền
                 `Cấp tiền` cho phép tài khoản tạo giao dịch `NHẬP` cho các nhân viên khác.
               </p>
-              <div class="table-wrap">
-                <table>
+              <div class="table-wrap table-wrap-user-full">
+                <table class="user-permissions-table">
                   <thead>
                     <tr>
                       <th>Tài khoản</th>
@@ -903,6 +1073,11 @@
                       <th>Xoá giao dịch</th>
                       <th>Tài chính</th>
                       <th>Cấp tiền</th>
+                      <th>Quản lý kho</th>
+                      <th>Nhập kho</th>
+                      <th>Xuất kho</th>
+                      <th>Nhập spa</th>
+                      <th>Xuất spa</th>
                       <th class="hidden">Hoa hồng</th>
                       <th class="hidden">Sửa hoa hồng</th>
                       <th class="hidden">Xoá hoa hồng</th>
@@ -945,6 +1120,7 @@
     </div>
 
     <script src="runtime-config.js"></script>
+    <script src="seed-state.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
