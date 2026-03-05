@@ -112,6 +112,7 @@ const state = {
   financeExpenseFormOpen: false,
   financeCategoryEditingCode: "",
   financeReclassTargetTransactionId: "",
+  financeHistoryLimit: 10,
   financePendingReceipt: null,
   financeVisibleRows: [],
   activeTab: "",
@@ -264,6 +265,7 @@ const refs = {
   financeReclassResult: document.getElementById("finance-reclass-result"),
   financeTableHead: document.getElementById("finance-table-head"),
   financeTableBody: document.getElementById("finance-table-body"),
+  financeLoadMoreBtn: document.getElementById("finance-load-more-btn"),
 
   maintenanceForm: document.getElementById("maintenance-form"),
   maintenanceFromDate: document.getElementById("maintenance-from-date"),
@@ -448,10 +450,16 @@ function bindEvents() {
     });
   }
   if (refs.financeSearchNote) {
-    refs.financeSearchNote.addEventListener("input", renderFinance);
+    refs.financeSearchNote.addEventListener("input", () => {
+      resetFinanceHistoryLimit();
+      renderFinance();
+    });
   }
   if (refs.financeSearchAmount) {
-    refs.financeSearchAmount.addEventListener("input", renderFinance);
+    refs.financeSearchAmount.addEventListener("input", () => {
+      resetFinanceHistoryLimit();
+      renderFinance();
+    });
   }
   if (refs.financeExportCsvBtn) {
     refs.financeExportCsvBtn.addEventListener("click", exportFinanceVisibleRowsCsv);
@@ -474,7 +482,14 @@ function bindEvents() {
       const row = event.target.closest("tr[data-user-id]");
       const userId = (button?.dataset.userId || row?.dataset.userId || "").trim();
       if (!userId) return;
+      resetFinanceHistoryLimit();
       state.financeSelectedUserId = userId;
+      renderFinance();
+    });
+  }
+  if (refs.financeLoadMoreBtn) {
+    refs.financeLoadMoreBtn.addEventListener("click", () => {
+      state.financeHistoryLimit = getFinanceHistoryLimit() + 10;
       renderFinance();
     });
   }
@@ -979,6 +994,7 @@ function clearState() {
   state.financeExpenseFormOpen = false;
   state.financeCategoryEditingCode = "";
   state.financeReclassTargetTransactionId = "";
+  state.financeHistoryLimit = 10;
   state.financePendingReceipt = null;
   state.financeVisibleRows = [];
 }
@@ -1858,6 +1874,46 @@ function getFinanceSignedAmount(item) {
   return type === FINANCE_TYPE_IN ? amount : -amount;
 }
 
+function toFinanceTimestamp(item) {
+  const raw = item?.createdAt || item?.timestamp || "";
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+  return 0;
+}
+
+function sortFinanceRowsByNewest(a, b) {
+  const timeDiff = toFinanceTimestamp(b) - toFinanceTimestamp(a);
+  if (timeDiff !== 0) return timeDiff;
+  return String(b?.createdAt || b?.timestamp || "").localeCompare(String(a?.createdAt || a?.timestamp || ""));
+}
+
+function getFinanceHistoryLimit() {
+  const limit = Number(state.financeHistoryLimit);
+  return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 10;
+}
+
+function resetFinanceHistoryLimit() {
+  state.financeHistoryLimit = 10;
+}
+
+function getFinanceRowsWithHistoryLimit(rows) {
+  return rows.slice(0, getFinanceHistoryLimit());
+}
+
+function renderFinanceLoadMoreButton(totalRows) {
+  if (!refs.financeLoadMoreBtn) return;
+  const safeTotal = Number(totalRows || 0);
+  const limit = getFinanceHistoryLimit();
+  const remaining = safeTotal - limit;
+  if (remaining > 0) {
+    refs.financeLoadMoreBtn.classList.remove("hidden");
+    refs.financeLoadMoreBtn.textContent = `Xem thêm ${Math.min(10, remaining)} dòng`;
+  } else {
+    refs.financeLoadMoreBtn.classList.add("hidden");
+    refs.financeLoadMoreBtn.textContent = "Xem thêm";
+  }
+}
+
 function isFinanceInternalTransferEntry(item) {
   return Boolean(item && typeof item.transferId === "string" && item.transferId.trim());
 }
@@ -2217,7 +2273,7 @@ function readFinanceHistoryFilters() {
 function filterFinanceHistoryRows(rows) {
   const filters = readFinanceHistoryFilters();
   const latestReclassMap = getLatestFinanceCategoryReclassMap();
-  return rows.filter((item) => {
+  const filtered = rows.filter((item) => {
     if (filters.hasAmount && Number(item.amount || 0) !== filters.amount) {
       return false;
     }
@@ -2240,6 +2296,7 @@ function filterFinanceHistoryRows(rows) {
 
     return true;
   });
+  return filtered.sort(sortFinanceRowsByNewest);
 }
 
 function buildFinanceVisibleRowsCsv(rows) {
@@ -4455,13 +4512,14 @@ function renderMemberFinance(currentUser) {
   const canFund = canGrantFinanceToMembers(currentUser);
   const latestReclassMap = getLatestFinanceCategoryReclassMap();
   const totals = getFinanceTotalsForUser(currentUser.id);
-  const allRows = [...totals.rows].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-  const recentExpenses = filterFinanceHistoryRows(
+  const allRows = [...totals.rows].sort(sortFinanceRowsByNewest);
+  const filteredExpenses = filterFinanceHistoryRows(
     [...totals.rows]
       .filter((item) => normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_OUT)
-      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
-  ).slice(0, 50);
-  setFinanceVisibleRows(recentExpenses);
+      .sort(sortFinanceRowsByNewest),
+  );
+  const visibleExpenses = getFinanceRowsWithHistoryLimit(filteredExpenses);
+  setFinanceVisibleRows(visibleExpenses);
   if (refs.financeExportCsvBtn) refs.financeExportCsvBtn.classList.remove("hidden");
 
   if (refs.financeRoleDesc) {
@@ -4496,13 +4554,14 @@ function renderMemberFinance(currentUser) {
   renderAdminFinanceReport(allRows, [currentUser], { forceUserId: currentUser.id });
 
   setFinanceTableHead(["Thời gian", "Nhân viên", "Danh mục", "Số tiền", "Nội dung", "Hóa đơn"]);
-  if (recentExpenses.length === 0) {
+  if (filteredExpenses.length === 0) {
     refs.financeTableBody.innerHTML =
       '<tr><td class="empty-cell" colspan="6">Không có khoản xuất phù hợp bộ lọc hiện tại.</td></tr>';
+    renderFinanceLoadMoreButton(0);
     return;
   }
 
-  refs.financeTableBody.innerHTML = recentExpenses
+  refs.financeTableBody.innerHTML = visibleExpenses
     .map(
       (item) => `
       <tr>
@@ -4516,10 +4575,11 @@ function renderMemberFinance(currentUser) {
     `,
     )
     .join("");
+  renderFinanceLoadMoreButton(filteredExpenses.length);
 }
 
 function renderAdminFinance() {
-  const allRows = [...state.financeTransactions].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  const allRows = [...state.financeTransactions].sort(sortFinanceRowsByNewest);
   const externalRows = allRows.filter((item) => !isFinanceInternalTransferEntry(item));
   const latestReclassMap = getLatestFinanceCategoryReclassMap();
   const totalNhap = externalRows
@@ -4591,6 +4651,7 @@ function renderAdminFinance() {
 
   if (!state.financeSelectedUserId) {
     setFinanceVisibleRows([]);
+    renderFinanceLoadMoreButton(0);
     if (refs.financeHistoryTitle) {
       refs.financeHistoryTitle.textContent = "Lịch sử giao dịch";
     }
@@ -4617,7 +4678,8 @@ function renderAdminFinance() {
   }
 
   const userRows = filterFinanceHistoryRows(allRows.filter((item) => item.userId === state.financeSelectedUserId));
-  setFinanceVisibleRows(userRows);
+  const visibleRows = getFinanceRowsWithHistoryLimit(userRows);
+  setFinanceVisibleRows(visibleRows);
   setFinanceTableHead([
     "Thời gian",
     "Loại",
@@ -4632,10 +4694,11 @@ function renderAdminFinance() {
   if (userRows.length === 0) {
     refs.financeTableBody.innerHTML =
       '<tr><td class="empty-cell" colspan="9">Không có giao dịch phù hợp bộ lọc hiện tại.</td></tr>';
+    renderFinanceLoadMoreButton(0);
     return;
   }
 
-  refs.financeTableBody.innerHTML = userRows
+  refs.financeTableBody.innerHTML = visibleRows
     .map(
       (item) => `
       <tr>
@@ -4658,6 +4721,7 @@ function renderAdminFinance() {
     `,
     )
     .join("");
+  renderFinanceLoadMoreButton(userRows.length);
 }
 
 function buildFinanceCategoryCodeFromName(name, existingCodes = new Set()) {
@@ -5078,6 +5142,7 @@ function addFinanceTransaction() {
   const currentUser = getCurrentUser();
   const values = readFinanceFormValues();
   if (!values || !currentUser) return;
+  resetFinanceHistoryLimit();
 
   const createdAt = buildFinanceCreatedAt(values.transactionDate);
   if (!createdAt) {
@@ -5169,6 +5234,7 @@ function addFinanceTransaction() {
 async function addFinanceTransactionRemote() {
   const values = readFinanceFormValues();
   if (!values) return;
+  resetFinanceHistoryLimit();
 
   try {
     const payload = await apiRequest("/finance/transactions", {
@@ -5215,6 +5281,7 @@ function renderFinance() {
   const currentUser = getCurrentUser();
   if (!currentUser) {
     setFinanceVisibleRows([]);
+    renderFinanceLoadMoreButton(0);
     clearFinanceReceiptSelection();
     if (refs.financeRoleDesc) refs.financeRoleDesc.textContent = "Vui lòng đăng nhập để dùng tính năng tài chính.";
     refs.financeBalance.textContent = "Vui lòng đăng nhập.";
@@ -5234,6 +5301,7 @@ function renderFinance() {
 
   if (!hasFeaturePermission(currentUser, "finance")) {
     setFinanceVisibleRows([]);
+    renderFinanceLoadMoreButton(0);
     clearFinanceReceiptSelection();
     if (refs.financeRoleDesc) refs.financeRoleDesc.textContent = "Bạn chưa có quyền truy cập tính năng tài chính.";
     refs.financeBalance.textContent = "Bạn chưa có quyền truy cập tính năng tài chính.";
