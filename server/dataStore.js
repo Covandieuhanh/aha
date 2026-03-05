@@ -1265,6 +1265,97 @@ function getFinanceBalanceForUser(userId) {
   }, 0);
 }
 
+function assertAdminFinanceMutationPermission(requestUser) {
+  assertFeaturePermission(requestUser, "finance");
+  if (requestUser.role !== "admin") {
+    throw httpError(403, "Chỉ quản trị viên được sửa hoặc xoá giao dịch tài chính.");
+  }
+}
+
+function findFinanceTransactionById(transactionId) {
+  const targetId = typeof transactionId === "string" ? transactionId.trim() : "";
+  if (!targetId) {
+    throw httpError(400, "Thiếu mã giao dịch.");
+  }
+
+  const transaction = state.financeTransactions.find((item) => item.id === targetId && item.integrityValid !== false);
+  if (!transaction) {
+    throw httpError(404, "Không tìm thấy giao dịch hợp lệ.");
+  }
+
+  return transaction;
+}
+
+function ensureMemberWalletTransaction(transaction) {
+  const walletUser = state.users.find((item) => item.id === transaction.userId);
+  if (!walletUser || walletUser.role !== "member") {
+    throw httpError(403, "Chỉ được thao tác giao dịch thuộc ví nhân viên.");
+  }
+}
+
+function applyTransactionDateToFinanceCreatedAt(currentCreatedAt, transactionDate) {
+  const dayKey = typeof transactionDate === "string" ? transactionDate.trim() : "";
+  if (!dayKey) {
+    return currentCreatedAt;
+  }
+
+  if (!isValidDay(dayKey)) {
+    return "";
+  }
+
+  const reference = new Date(currentCreatedAt || Date.now());
+  const refDate = Number.isNaN(reference.getTime()) ? new Date() : reference;
+  const timePart = `${String(refDate.getHours()).padStart(2, "0")}:${String(refDate.getMinutes()).padStart(2, "0")}:${String(
+    refDate.getSeconds(),
+  ).padStart(2, "0")}`;
+  const createdAt = `${dayKey}T${timePart}`;
+  const parsed = new Date(createdAt);
+  return Number.isNaN(parsed.getTime()) ? "" : createdAt;
+}
+
+function assertFinanceBalancesNotNegative(transactions) {
+  const balances = new Map();
+  const rows = Array.isArray(transactions) ? transactions : [];
+
+  rows.forEach((item) => {
+    const userId = typeof item?.userId === "string" ? item.userId : "";
+    if (!userId) return;
+    const amount = Number(item.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const type = normalizeFinanceTransactionType(item.type);
+    if (!type) return;
+
+    const delta = type === FINANCE_TYPE_IN ? amount : -amount;
+    balances.set(userId, (balances.get(userId) || 0) + delta);
+  });
+
+  const negativeEntry = Array.from(balances.entries()).find(([, balance]) => balance < 0);
+  if (!negativeEntry) return;
+
+  const [userId, balance] = negativeEntry;
+  const user = state.users.find((item) => item.id === userId);
+  const userLabel = user ? `${user.fullName} (${user.username})` : userId;
+  throw httpError(
+    409,
+    `Không thể lưu thay đổi vì số tồn của ${userLabel} sẽ âm ${Math.abs(Math.round(balance)).toLocaleString("vi-VN")} VND.`,
+  );
+}
+
+function rebuildFinanceLedgerIntegrity() {
+  state.financeTransactions = state.financeTransactions.map((item) => ({
+    ...item,
+    integrityPrevHash: "",
+    integrityHash: "",
+    integrityVersion: 1,
+    integrityValid: true,
+  }));
+
+  const result = applyFinanceLedgerIntegrity(state.financeTransactions);
+  if (result.invalidCount > 0) {
+    throw httpError(500, "Không thể tái tạo chuỗi toàn vẹn cho sổ giao dịch tài chính.");
+  }
+}
+
 function getFinanceAuditLogsForClient(requestUser, options = {}) {
   assertFeaturePermission(requestUser, "finance");
 
@@ -2046,6 +2137,210 @@ function addFinanceTransaction(requestUser, input) {
   };
 }
 
+function updateFinanceTransaction(requestUser, transactionId, input) {
+  assertAdminFinanceMutationPermission(requestUser);
+
+  const transaction = findFinanceTransactionById(transactionId);
+  ensureMemberWalletTransaction(transaction);
+
+  const patchInput = input && typeof input === "object" ? input : {};
+  const hasAmount = Object.prototype.hasOwnProperty.call(patchInput, "amount");
+  const hasNote = Object.prototype.hasOwnProperty.call(patchInput, "note");
+  const hasDate = Object.prototype.hasOwnProperty.call(patchInput, "transactionDate");
+  const hasCategory = Object.prototype.hasOwnProperty.call(patchInput, "category");
+  if (!hasAmount && !hasNote && !hasDate && !hasCategory) {
+    throw httpError(400, "Vui lòng cung cấp ít nhất một trường cần cập nhật.");
+  }
+
+  const nextAmount = hasAmount ? Number(patchInput.amount || 0) : Number(transaction.amount || 0);
+  if (!Number.isFinite(nextAmount) || nextAmount <= 0) {
+    throw httpError(400, "Số tiền phải lớn hơn 0.");
+  }
+
+  const nextDateRaw = hasDate ? patchInput.transactionDate : dayOf(transaction.createdAt || transaction.timestamp || "");
+  const nextCreatedAt = applyTransactionDateToFinanceCreatedAt(transaction.createdAt || transaction.timestamp || "", nextDateRaw);
+  if (!nextCreatedAt) {
+    throw httpError(400, "Ngày giao dịch không hợp lệ.");
+  }
+
+  const noteInput = hasNote ? patchInput.note : transaction.note;
+  let nextNote = normalizeTextValue(noteInput);
+  if (!nextNote) {
+    throw httpError(400, "Vui lòng nhập nội dung mô tả giao dịch.");
+  }
+  if (nextNote.length > 500) {
+    throw httpError(400, "Nội dung mô tả tối đa 500 ký tự.");
+  }
+
+  const shouldAdjust = Boolean(transaction.isAdjustment || transaction.adjustmentOf || isAdjustmentNote(nextNote));
+  if (shouldAdjust) {
+    nextNote = normalizeAdjustmentNote(nextNote);
+  }
+
+  const baseType = normalizeFinanceTransactionType(transaction.type);
+  if (!baseType) {
+    throw httpError(400, "Loại giao dịch hiện tại không hợp lệ.");
+  }
+
+  const previousSnapshot = clone(transaction);
+  const updatedIds = [transaction.id];
+  const isInternalTransfer = Boolean(transaction.transferId);
+  let transferCounterpartSnapshot = null;
+  let removedReclassCount = 0;
+
+  if (isInternalTransfer) {
+    if (hasCategory) {
+      throw httpError(400, "Giao dịch chuyển nội bộ không hỗ trợ chỉnh danh mục.");
+    }
+
+    const counterpart = state.financeTransactions.find(
+      (item) =>
+        item.id !== transaction.id &&
+        item.transferId === transaction.transferId &&
+        item.integrityValid !== false &&
+        normalizeFinanceTransactionType(item.type),
+    );
+    if (!counterpart) {
+      throw httpError(409, "Không tìm thấy bút toán đối ứng của giao dịch chuyển nội bộ.");
+    }
+
+    transferCounterpartSnapshot = clone(counterpart);
+    updatedIds.push(counterpart.id);
+
+    transaction.amount = nextAmount;
+    transaction.note = nextNote;
+    transaction.createdAt = nextCreatedAt;
+    transaction.timestamp = nextCreatedAt;
+    transaction.isAdjustment = false;
+    transaction.category = "";
+    transaction.receiptImageDataUrl = "";
+    transaction.receiptImageName = "";
+
+    counterpart.amount = nextAmount;
+    counterpart.note = nextNote;
+    counterpart.createdAt = nextCreatedAt;
+    counterpart.timestamp = nextCreatedAt;
+    counterpart.isAdjustment = false;
+    counterpart.category = "";
+    counterpart.receiptImageDataUrl = "";
+    counterpart.receiptImageName = "";
+  } else {
+    let nextCategory = transaction.category || "";
+    if (baseType === FINANCE_TYPE_OUT) {
+      if (hasCategory) {
+        const resolved = resolveFinanceExpenseCategoryCode(patchInput.category, state.financeExpenseCategories, {
+          allowInactive: false,
+        });
+        if (!resolved) {
+          throw httpError(400, "Danh mục xuất không hợp lệ hoặc đã ngừng sử dụng.");
+        }
+        nextCategory = resolved;
+      } else if (!nextCategory) {
+        throw httpError(400, "Danh mục xuất không hợp lệ.");
+      }
+    } else if (hasCategory) {
+      throw httpError(400, "Giao dịch NHẬP không hỗ trợ chỉnh danh mục.");
+    }
+
+    transaction.amount = nextAmount;
+    transaction.note = nextNote;
+    transaction.createdAt = nextCreatedAt;
+    transaction.timestamp = nextCreatedAt;
+    transaction.isAdjustment = shouldAdjust;
+    transaction.category = baseType === FINANCE_TYPE_OUT ? nextCategory : "";
+    transaction.receiptImageDataUrl = baseType === FINANCE_TYPE_OUT ? transaction.receiptImageDataUrl || "" : "";
+    transaction.receiptImageName = baseType === FINANCE_TYPE_OUT ? transaction.receiptImageName || "" : "";
+
+    if (baseType === FINANCE_TYPE_OUT && previousSnapshot.category !== transaction.category) {
+      const beforeCount = state.financeCategoryReclassLogs.length;
+      state.financeCategoryReclassLogs = state.financeCategoryReclassLogs.filter((item) => item.transactionId !== transaction.id);
+      removedReclassCount = beforeCount - state.financeCategoryReclassLogs.length;
+    }
+  }
+
+  assertFinanceBalancesNotNegative(state.financeTransactions);
+  rebuildFinanceLedgerIntegrity();
+  appendSystemAuditLog({
+    domain: FINANCE_LOG_DOMAIN,
+    action: "FINANCE_TRANSACTION_UPDATED",
+    actorId: requestUser.id,
+    walletUserId: transaction.userId,
+    transactionId: transaction.id,
+    createdAt: new Date().toISOString(),
+    details: {
+      isInternalTransfer,
+      updatedTransactionIds: updatedIds,
+      removedReclassCount,
+      before: previousSnapshot,
+      after: clone(transaction),
+      counterpartBefore: transferCounterpartSnapshot,
+    },
+  });
+  persist();
+
+  return {
+    transaction: clone(transaction),
+    updatedTransactionIds: clone(updatedIds),
+    targetBalance: getFinanceBalanceForUser(transaction.userId),
+    financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
+    financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+    financeCategoryReclassLogs: clone(getFinanceCategoryReclassLogsForClient(requestUser)),
+  };
+}
+
+function deleteFinanceTransaction(requestUser, transactionId) {
+  assertAdminFinanceMutationPermission(requestUser);
+
+  const transaction = findFinanceTransactionById(transactionId);
+  ensureMemberWalletTransaction(transaction);
+
+  const deleteIds = new Set([transaction.id]);
+  const deletedSnapshots = [clone(transaction)];
+  const isInternalTransfer = Boolean(transaction.transferId);
+  if (isInternalTransfer) {
+    const counterpart = state.financeTransactions.find(
+      (item) =>
+        item.id !== transaction.id &&
+        item.transferId === transaction.transferId &&
+        item.integrityValid !== false &&
+        normalizeFinanceTransactionType(item.type),
+    );
+    if (!counterpart) {
+      throw httpError(409, "Không tìm thấy bút toán đối ứng của giao dịch chuyển nội bộ.");
+    }
+    deleteIds.add(counterpart.id);
+    deletedSnapshots.push(clone(counterpart));
+  }
+
+  state.financeTransactions = state.financeTransactions.filter((item) => !deleteIds.has(item.id));
+  state.financeCategoryReclassLogs = state.financeCategoryReclassLogs.filter((item) => !deleteIds.has(item.transactionId));
+
+  assertFinanceBalancesNotNegative(state.financeTransactions);
+  rebuildFinanceLedgerIntegrity();
+  appendSystemAuditLog({
+    domain: FINANCE_LOG_DOMAIN,
+    action: "FINANCE_TRANSACTION_DELETED",
+    actorId: requestUser.id,
+    walletUserId: transaction.userId,
+    transactionId: transaction.id,
+    createdAt: new Date().toISOString(),
+    details: {
+      isInternalTransfer,
+      deletedTransactionIds: Array.from(deleteIds),
+      deletedTransactions: deletedSnapshots,
+    },
+  });
+  persist();
+
+  return {
+    deletedTransactionId: transaction.id,
+    deletedTransactionIds: Array.from(deleteIds),
+    financeTransactions: clone(getFinanceTransactionsForClient(requestUser)),
+    financeExpenseCategories: clone(getFinanceExpenseCategoriesForClient(requestUser)),
+    financeCategoryReclassLogs: clone(getFinanceCategoryReclassLogsForClient(requestUser)),
+  };
+}
+
 function createFinanceExpenseCategory(requestUser, input) {
   assertFeaturePermission(requestUser, "finance");
   if (requestUser.role !== "admin") {
@@ -2547,6 +2842,8 @@ module.exports = {
   updateReferral,
   deleteReferral,
   addFinanceTransaction,
+  updateFinanceTransaction,
+  deleteFinanceTransaction,
   createFinanceExpenseCategory,
   updateFinanceExpenseCategory,
   deleteFinanceExpenseCategory,

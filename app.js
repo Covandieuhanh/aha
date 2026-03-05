@@ -110,6 +110,7 @@ const state = {
   editingReferralId: null,
   financeSelectedUserId: "",
   financeExpenseFormOpen: false,
+  financeEditingTransactionId: "",
   financeCategoryEditingCode: "",
   financeReclassTargetTransactionId: "",
   financeHistoryLimit: 10,
@@ -425,12 +426,10 @@ function bindEvents() {
   }
   if (refs.financeCancelBtn) {
     refs.financeCancelBtn.addEventListener("click", () => {
+      resetFinanceTransactionEditState();
       state.financeExpenseFormOpen = false;
       if (refs.financeForm) refs.financeForm.classList.add("hidden");
-      if (refs.financeAmount) refs.financeAmount.value = "";
-      if (refs.financeDate) refs.financeDate.value = "";
-      if (refs.financeNote) refs.financeNote.value = "";
-      clearFinanceReceiptSelection();
+      if (refs.financeUser && refs.financeUser.disabled) refs.financeUser.value = "";
       renderFinance();
     });
   }
@@ -523,6 +522,18 @@ function bindEvents() {
   }
   if (refs.financeTableBody) {
     refs.financeTableBody.addEventListener("click", (event) => {
+      const editBtn = event.target.closest(".finance-edit-transaction-btn");
+      if (editBtn) {
+        startFinanceTransactionEdit((editBtn.dataset.transactionId || "").trim());
+        return;
+      }
+
+      const deleteBtn = event.target.closest(".finance-delete-transaction-btn");
+      if (deleteBtn) {
+        void deleteFinanceTransactionById((deleteBtn.dataset.transactionId || "").trim());
+        return;
+      }
+
       const reclassBtn = event.target.closest(".finance-reclass-open-btn");
       if (!reclassBtn) return;
       const transactionId = (reclassBtn.dataset.transactionId || "").trim();
@@ -992,6 +1003,7 @@ function clearState() {
   state.editingReferralId = null;
   state.financeSelectedUserId = "";
   state.financeExpenseFormOpen = false;
+  state.financeEditingTransactionId = "";
   state.financeCategoryEditingCode = "";
   state.financeReclassTargetTransactionId = "";
   state.financeHistoryLimit = 10;
@@ -1099,6 +1111,24 @@ function buildFinanceCreatedAt(transactionDate) {
 
   const timePart = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
   const createdAt = `${transactionDate}T${timePart}`;
+  const parsed = new Date(createdAt);
+  return Number.isNaN(parsed.getTime()) ? "" : createdAt;
+}
+
+function applyTransactionDateToFinanceCreatedAt(currentCreatedAt, transactionDate) {
+  const dayKey = typeof transactionDate === "string" ? transactionDate.trim() : "";
+  if (!dayKey) {
+    return currentCreatedAt;
+  }
+
+  if (!isValidDay(dayKey)) {
+    return "";
+  }
+
+  const reference = new Date(currentCreatedAt || Date.now());
+  const refDate = Number.isNaN(reference.getTime()) ? new Date() : reference;
+  const timePart = `${pad2(refDate.getHours())}:${pad2(refDate.getMinutes())}:${pad2(refDate.getSeconds())}`;
+  const createdAt = `${dayKey}T${timePart}`;
   const parsed = new Date(createdAt);
   return Number.isNaN(parsed.getTime()) ? "" : createdAt;
 }
@@ -1558,6 +1588,27 @@ function canGrantFinanceToMembers(user) {
   return Boolean(user.permissions?.financeFund);
 }
 
+function isMemberWalletUserId(userId) {
+  if (!userId) return false;
+  const user = state.users.find((item) => item.id === userId);
+  return Boolean(user && user.role === "member");
+}
+
+function getFinanceTransactionById(transactionId) {
+  const targetId = typeof transactionId === "string" ? transactionId.trim() : "";
+  if (!targetId) return null;
+  return state.financeTransactions.find((item) => item.id === targetId) || null;
+}
+
+function getAdminEditableFinanceTransaction(transactionId) {
+  const currentUser = getCurrentUser();
+  if (!isAdmin(currentUser)) return null;
+  const transaction = getFinanceTransactionById(transactionId);
+  if (!transaction) return null;
+  if (!isMemberWalletUserId(transaction.userId)) return null;
+  return transaction;
+}
+
 function hasFeaturePermission(user, featureKey) {
   if (!user) return false;
   if (isAdmin(user)) return true;
@@ -1610,6 +1661,7 @@ function renderAuthState() {
     state.editingReferralId = null;
     state.financeSelectedUserId = "";
     state.financeExpenseFormOpen = false;
+    state.financeEditingTransactionId = "";
     setCustomerFormMode(false);
     setProductFormMode(false);
     setVisitFormMode(false);
@@ -1941,6 +1993,27 @@ function getFinanceBalanceByUserId(userId) {
     if (item.userId !== userId) return sum;
     return sum + getFinanceSignedAmount(item);
   }, 0);
+}
+
+function assertFinanceBalancesNotNegativeLocal(transactions) {
+  const rows = Array.isArray(transactions) ? transactions : [];
+  const balances = new Map();
+
+  rows.forEach((item) => {
+    const userId = typeof item?.userId === "string" ? item.userId : "";
+    if (!userId) return;
+    const signedAmount = getFinanceSignedAmount(item);
+    if (!signedAmount) return;
+    balances.set(userId, (balances.get(userId) || 0) + signedAmount);
+  });
+
+  const negativeEntry = [...balances.entries()].find(([, balance]) => balance < 0);
+  if (!negativeEntry) return;
+
+  const [userId, balance] = negativeEntry;
+  throw new Error(
+    `Không thể lưu thay đổi vì số tồn của ${getUserDisplayName(userId)} sẽ âm ${Math.abs(Math.round(balance)).toLocaleString("vi-VN")} VND.`,
+  );
 }
 
 function normalizeFinanceNoteText(note) {
@@ -3960,12 +4033,401 @@ async function addReferralRemote() {
   }
 }
 
+function getFinanceEditingTransaction() {
+  return getAdminEditableFinanceTransaction(state.financeEditingTransactionId);
+}
+
+function resetFinanceFormInputs() {
+  if (refs.financeAmount) refs.financeAmount.value = "";
+  if (refs.financeDate) refs.financeDate.value = "";
+  if (refs.financeCategory) refs.financeCategory.value = getDefaultFinanceExpenseCategoryCode();
+  if (refs.financeNote) refs.financeNote.value = "";
+  if (refs.financeType) refs.financeType.dataset.touched = "";
+  clearFinanceReceiptSelection();
+}
+
+function resetFinanceTransactionEditState(options = {}) {
+  const clearInputs = options.clearInputs !== false;
+  state.financeEditingTransactionId = "";
+  if (clearInputs) {
+    resetFinanceFormInputs();
+  }
+}
+
+function startFinanceTransactionEdit(transactionId) {
+  const transaction = getAdminEditableFinanceTransaction(transactionId);
+  if (!transaction) {
+    if (refs.financeResult) refs.financeResult.textContent = "Chỉ có thể sửa giao dịch thuộc ví nhân viên.";
+    return;
+  }
+
+  const normalizedType = normalizeFinanceTransactionType(transaction.type);
+  state.financeEditingTransactionId = transaction.id;
+  state.financeExpenseFormOpen = true;
+  state.financeReclassTargetTransactionId = "";
+
+  if (refs.financeType) {
+    refs.financeType.dataset.touched = "true";
+    refs.financeType.value = normalizedType || FINANCE_TYPE_OUT;
+  }
+  if (refs.financeAmount) {
+    refs.financeAmount.value = formatNumberDisplay(transaction.amount || 0);
+  }
+  if (refs.financeDate) {
+    refs.financeDate.value = getFinanceTransactionDayKey(transaction) || "";
+  }
+  if (refs.financeNote) {
+    refs.financeNote.value = transaction.note || "";
+  }
+  if (refs.financeCategory) {
+    if (normalizedType === FINANCE_TYPE_OUT && !transaction.transferId) {
+      const resolved = resolveFinanceExpenseCategoryCode(transaction.category || "", { allowInactive: false });
+      refs.financeCategory.value = resolved || getDefaultFinanceExpenseCategoryCode();
+    } else {
+      refs.financeCategory.value = getDefaultFinanceExpenseCategoryCode();
+    }
+  }
+  if (refs.financeUser) {
+    refs.financeUser.value = getUserDisplayName(transaction.userId);
+  }
+  clearFinanceReceiptSelection();
+  if (refs.financeResult) {
+    refs.financeResult.textContent = `Đang sửa giao dịch ${transaction.id}.`;
+  }
+  renderFinance();
+}
+
+function readFinanceEditFormValues(transaction) {
+  const currentUser = getCurrentUser();
+  if (!isAdmin(currentUser)) {
+    if (refs.financeResult) refs.financeResult.textContent = "Chỉ quản trị viên được sửa giao dịch tài chính.";
+    return null;
+  }
+
+  const amount = unformatNumber(refs.financeAmount?.value || "");
+  if (!Number.isFinite(amount) || amount <= 0) {
+    if (refs.financeResult) refs.financeResult.textContent = "Số tiền phải lớn hơn 0.";
+    return null;
+  }
+
+  const noteInput = normalizeFinanceNoteText(refs.financeNote?.value || "");
+  if (!noteInput) {
+    if (refs.financeResult) refs.financeResult.textContent = "Vui lòng nhập nội dung mô tả giao dịch.";
+    return null;
+  }
+  if (noteInput.length > 500) {
+    if (refs.financeResult) refs.financeResult.textContent = "Nội dung mô tả tối đa 500 ký tự.";
+    return null;
+  }
+  const note = isAdjustmentFinanceNote(noteInput) ? normalizeAdjustmentFinanceNote(noteInput) : noteInput;
+
+  const dateInput = String(refs.financeDate?.value || "").trim();
+  if (dateInput && !isValidDay(dateInput)) {
+    if (refs.financeResult) refs.financeResult.textContent = "Ngày giao dịch không hợp lệ.";
+    return null;
+  }
+  const transactionDate = dateInput || getFinanceTransactionDayKey(transaction) || dayOf(transaction.createdAt || "");
+  if (!transactionDate || !isValidDay(transactionDate)) {
+    if (refs.financeResult) refs.financeResult.textContent = "Ngày giao dịch không hợp lệ.";
+    return null;
+  }
+
+  const normalizedType = normalizeFinanceTransactionType(transaction.type);
+  const isTransfer = Boolean(transaction.transferId);
+  let category = "";
+  if (normalizedType === FINANCE_TYPE_OUT && !isTransfer) {
+    category = resolveFinanceExpenseCategoryCode(refs.financeCategory?.value || "", { allowInactive: false });
+    if (!category) {
+      if (refs.financeResult) refs.financeResult.textContent = "Danh mục xuất không hợp lệ.";
+      return null;
+    }
+  }
+
+  return {
+    amount,
+    note,
+    transactionDate,
+    category,
+  };
+}
+
+function applyFinanceTransactionUpdateLocal(transaction, payload) {
+  const transactionMap = new Map(state.financeTransactions.map((item) => [item.id, item]));
+  const target = transactionMap.get(transaction.id);
+  if (!target) {
+    throw new Error("Không tìm thấy giao dịch cần cập nhật.");
+  }
+
+  const nextCreatedAt = applyTransactionDateToFinanceCreatedAt(
+    target.createdAt || target.timestamp || "",
+    payload.transactionDate,
+  );
+  if (!nextCreatedAt) {
+    throw new Error("Ngày giao dịch không hợp lệ.");
+  }
+
+  const normalizedType = normalizeFinanceTransactionType(target.type);
+  const previousCategory = target.category || "";
+  const updatedIds = [target.id];
+
+  if (target.transferId) {
+    const counterpart = state.financeTransactions.find(
+      (item) =>
+        item.id !== target.id &&
+        item.transferId === target.transferId &&
+        normalizeFinanceTransactionType(item.type) &&
+        item.userId,
+    );
+    if (!counterpart) {
+      throw new Error("Không tìm thấy bút toán đối ứng của giao dịch chuyển nội bộ.");
+    }
+
+    updatedIds.push(counterpart.id);
+
+    target.amount = payload.amount;
+    target.note = payload.note;
+    target.createdAt = nextCreatedAt;
+    target.timestamp = nextCreatedAt;
+    target.isAdjustment = false;
+    target.category = "";
+
+    counterpart.amount = payload.amount;
+    counterpart.note = payload.note;
+    counterpart.createdAt = nextCreatedAt;
+    counterpart.timestamp = nextCreatedAt;
+    counterpart.isAdjustment = false;
+    counterpart.category = "";
+  } else {
+    target.amount = payload.amount;
+    target.note = payload.note;
+    target.createdAt = nextCreatedAt;
+    target.timestamp = nextCreatedAt;
+    target.isAdjustment = Boolean(target.adjustmentOf) || isAdjustmentFinanceNote(payload.note);
+    if (normalizedType === FINANCE_TYPE_OUT) {
+      target.category = payload.category || target.category || getDefaultFinanceExpenseCategoryCode();
+    } else {
+      target.category = "";
+    }
+
+    if (normalizedType === FINANCE_TYPE_OUT && target.category !== previousCategory) {
+      state.financeCategoryReclassLogs = state.financeCategoryReclassLogs.filter((item) => item.transactionId !== target.id);
+    }
+  }
+
+  assertFinanceBalancesNotNegativeLocal(state.financeTransactions);
+  normalizeAllRecords();
+  saveState();
+  return updatedIds;
+}
+
+async function updateFinanceTransactionRemote(transaction, payload) {
+  const apiPayload = {
+    amount: payload.amount,
+    note: payload.note,
+    transactionDate: payload.transactionDate,
+  };
+  if (payload.category) {
+    apiPayload.category = payload.category;
+  }
+
+  const response = await apiRequest(`/finance/transactions/${encodeURIComponent(transaction.id)}`, {
+    method: "PATCH",
+    body: apiPayload,
+  });
+
+  if (Array.isArray(response?.financeTransactions)) {
+    state.financeTransactions = response.financeTransactions;
+    if (Array.isArray(response?.financeExpenseCategories)) {
+      state.financeExpenseCategories = response.financeExpenseCategories;
+    }
+    if (Array.isArray(response?.financeCategoryReclassLogs)) {
+      state.financeCategoryReclassLogs = response.financeCategoryReclassLogs;
+    }
+    normalizeAllRecords();
+  } else {
+    await syncFromServer({ preserveTab: true, silent: true });
+  }
+}
+
+async function submitFinanceTransactionEdit() {
+  const transaction = getFinanceEditingTransaction();
+  if (!transaction) {
+    if (refs.financeResult) refs.financeResult.textContent = "Không tìm thấy giao dịch cần sửa.";
+    resetFinanceTransactionEditState({ clearInputs: false });
+    renderFinance();
+    return;
+  }
+
+  const payload = readFinanceEditFormValues(transaction);
+  if (!payload) return;
+
+  try {
+    if (runtime.remoteMode) {
+      await updateFinanceTransactionRemote(transaction, payload);
+    } else {
+      applyFinanceTransactionUpdateLocal(transaction, payload);
+    }
+
+    const balance = getFinanceBalanceByUserId(transaction.userId);
+    resetFinanceTransactionEditState();
+    state.financeSelectedUserId = transaction.userId || state.financeSelectedUserId;
+    if (refs.financeResult) {
+      refs.financeResult.textContent = `Đã cập nhật giao dịch. Số tồn hiện tại: ${formatMoney(balance)}.`;
+      showModal(refs.financeResult.textContent);
+    }
+    renderFinance();
+  } catch (error) {
+    handleRemoteActionError(error, refs.financeResult, "Không thể cập nhật giao dịch tài chính.");
+  }
+}
+
+function applyFinanceTransactionDeleteLocal(transaction) {
+  const deleteIds = new Set([transaction.id]);
+  if (transaction.transferId) {
+    const counterpart = state.financeTransactions.find(
+      (item) =>
+        item.id !== transaction.id &&
+        item.transferId === transaction.transferId &&
+        normalizeFinanceTransactionType(item.type) &&
+        item.userId,
+    );
+    if (!counterpart) {
+      throw new Error("Không tìm thấy bút toán đối ứng của giao dịch chuyển nội bộ.");
+    }
+    deleteIds.add(counterpart.id);
+  }
+
+  state.financeTransactions = state.financeTransactions.filter((item) => !deleteIds.has(item.id));
+  state.financeCategoryReclassLogs = state.financeCategoryReclassLogs.filter((item) => !deleteIds.has(item.transactionId));
+  assertFinanceBalancesNotNegativeLocal(state.financeTransactions);
+  normalizeAllRecords();
+  saveState();
+  return Array.from(deleteIds);
+}
+
+async function deleteFinanceTransactionRemote(transactionId) {
+  const response = await apiRequest(`/finance/transactions/${encodeURIComponent(transactionId)}`, {
+    method: "DELETE",
+  });
+
+  if (Array.isArray(response?.financeTransactions)) {
+    state.financeTransactions = response.financeTransactions;
+    if (Array.isArray(response?.financeExpenseCategories)) {
+      state.financeExpenseCategories = response.financeExpenseCategories;
+    }
+    if (Array.isArray(response?.financeCategoryReclassLogs)) {
+      state.financeCategoryReclassLogs = response.financeCategoryReclassLogs;
+    }
+    normalizeAllRecords();
+  } else {
+    await syncFromServer({ preserveTab: true, silent: true });
+  }
+  return Array.isArray(response?.deletedTransactionIds) ? response.deletedTransactionIds : [transactionId];
+}
+
+async function deleteFinanceTransactionById(transactionId) {
+  const transaction = getAdminEditableFinanceTransaction(transactionId);
+  if (!transaction) {
+    if (refs.financeResult) refs.financeResult.textContent = "Chỉ có thể xoá giao dịch thuộc ví nhân viên.";
+    return;
+  }
+
+  if (!window.confirm("Bạn có chắc muốn xoá giao dịch này không?")) {
+    return;
+  }
+
+  try {
+    const deletedIds = runtime.remoteMode
+      ? await deleteFinanceTransactionRemote(transaction.id)
+      : applyFinanceTransactionDeleteLocal(transaction);
+
+    if (deletedIds.includes(state.financeEditingTransactionId)) {
+      resetFinanceTransactionEditState();
+    }
+    if (refs.financeResult) {
+      refs.financeResult.textContent = "Đã xoá giao dịch tài chính.";
+      showModal(refs.financeResult.textContent);
+    }
+    renderFinance();
+  } catch (error) {
+    handleRemoteActionError(error, refs.financeResult, "Không thể xoá giao dịch tài chính.");
+  }
+}
+
 function syncFinanceFormForRole() {
   const currentUser = getCurrentUser();
   const hasFinance = hasFeaturePermission(currentUser, "finance");
   const canFundMode = hasFinance && canGrantFinanceToMembers(currentUser);
   const adminMode = hasFinance && isAdmin(currentUser);
+  let editingTransaction = adminMode ? getFinanceEditingTransaction() : null;
+  if (state.financeEditingTransactionId && !editingTransaction) {
+    resetFinanceTransactionEditState({ clearInputs: false });
+  }
+  editingTransaction = adminMode ? getFinanceEditingTransaction() : null;
   const expenseMode = hasFinance && currentUser && !canFundMode;
+
+  if (editingTransaction) {
+    const normalizedType = normalizeFinanceTransactionType(editingTransaction.type);
+    const allowCategory = normalizedType === FINANCE_TYPE_OUT && !editingTransaction.transferId;
+    const selectedCategory = resolveFinanceExpenseCategoryCode(refs.financeCategory?.value || "", { allowInactive: false });
+
+    if (refs.financeOpenExpenseBtn) {
+      refs.financeOpenExpenseBtn.classList.add("hidden");
+    }
+    if (refs.financeCancelBtn) {
+      refs.financeCancelBtn.classList.remove("hidden");
+    }
+    if (refs.financeAdminStaffPanel) {
+      refs.financeAdminStaffPanel.classList.toggle("hidden", !adminMode);
+    }
+    if (refs.financeAdminReportPanel) {
+      refs.financeAdminReportPanel.classList.toggle("hidden", !hasFinance);
+    }
+    if (refs.financeReportUserGroup) {
+      refs.financeReportUserGroup.classList.toggle("hidden", !adminMode);
+    }
+    if (refs.financeReportUser) {
+      refs.financeReportUser.disabled = !adminMode;
+    }
+    if (refs.financeUserGroup) {
+      refs.financeUserGroup.classList.remove("hidden");
+    }
+    if (refs.financeUser) {
+      refs.financeUser.disabled = true;
+      refs.financeUser.value = getUserDisplayName(editingTransaction.userId);
+    }
+    if (refs.financeTypeGroup) {
+      refs.financeTypeGroup.classList.remove("hidden");
+    }
+    if (refs.financeType) {
+      refs.financeType.value = normalizedType || FINANCE_TYPE_OUT;
+      refs.financeType.disabled = true;
+    }
+    if (refs.financeCategoryGroup) {
+      refs.financeCategoryGroup.classList.toggle("hidden", !allowCategory);
+    }
+    if (refs.financeCategory) {
+      refs.financeCategory.disabled = !allowCategory;
+      refs.financeCategory.value = allowCategory
+        ? selectedCategory || getDefaultFinanceExpenseCategoryCode()
+        : getDefaultFinanceExpenseCategoryCode();
+    }
+    if (refs.financeReceiptGroup) {
+      refs.financeReceiptGroup.classList.add("hidden");
+    }
+    if (refs.financeReceipt) {
+      refs.financeReceipt.disabled = true;
+      clearFinanceReceiptSelection();
+    }
+    if (refs.financeSubmitBtn) {
+      refs.financeSubmitBtn.textContent = "Lưu chỉnh sửa giao dịch";
+    }
+    if (refs.financeForm) {
+      refs.financeForm.classList.remove("hidden");
+    }
+    return;
+  }
+
   const allowInputType = canFundMode && adminMode;
   const rawType = normalizeFinanceTransactionType(refs.financeType?.value);
   const hasTypeTouched = refs.financeType?.dataset?.touched === "true";
@@ -4609,7 +5071,8 @@ function renderAdminFinance() {
   if (refs.financeExportCsvBtn) refs.financeExportCsvBtn.classList.remove("hidden");
 
   if (refs.financeRoleDesc) {
-    refs.financeRoleDesc.textContent = "Dashboard tổng hợp tài chính, cấp tiền cho nhân viên và xem lịch sử giao dịch theo từng người.";
+    refs.financeRoleDesc.textContent =
+      "Dashboard tổng hợp tài chính, cấp tiền cho nhân viên và cho phép quản trị viên sửa/xoá giao dịch thuộc ví nhân viên.";
   }
   if (refs.financeSummary) {
     refs.financeSummary.innerHTML = `
@@ -4681,7 +5144,7 @@ function renderAdminFinance() {
       "Nhân viên liên quan",
       "Nội dung",
       "Hóa đơn",
-      "Điều chỉnh",
+      "Thao tác",
     ]);
     refs.financeTableBody.innerHTML = '<tr><td class="empty-cell" colspan="9">Chọn nhân viên để xem lịch sử giao dịch.</td></tr>';
     return;
@@ -4706,7 +5169,7 @@ function renderAdminFinance() {
     "Nhân viên liên quan",
     "Nội dung",
     "Hóa đơn",
-    "Điều chỉnh",
+    "Thao tác",
   ]);
   if (userRows.length === 0) {
     refs.financeTableBody.innerHTML =
@@ -4728,10 +5191,12 @@ function renderAdminFinance() {
         <td>${escapeHtml(item.note || "-")}</td>
         <td>${formatFinanceAttachmentCell(item)}</td>
         <td>
+          <button type="button" class="secondary-btn table-btn finance-edit-transaction-btn" data-transaction-id="${escapeHtml(item.id)}">Sửa</button>
+          <button type="button" class="secondary-btn table-btn finance-delete-transaction-btn" data-transaction-id="${escapeHtml(item.id)}">Xoá</button>
           ${
             isFinanceCategoryReclassEligible(item)
               ? `<button type="button" class="secondary-btn table-btn finance-reclass-open-btn" data-transaction-id="${escapeHtml(item.id)}">Chỉnh danh mục</button>`
-              : "-"
+              : ""
           }
         </td>
       </tr>
@@ -5151,6 +5616,11 @@ async function submitFinanceCategoryReclass() {
 }
 
 function addFinanceTransaction() {
+  if (state.financeEditingTransactionId) {
+    void submitFinanceTransactionEdit();
+    return;
+  }
+
   if (runtime.remoteMode) {
     void addFinanceTransactionRemote();
     return;
@@ -5236,11 +5706,7 @@ function addFinanceTransaction() {
   normalizeAllRecords();
   saveState();
 
-  refs.financeAmount.value = "";
-  if (refs.financeDate) refs.financeDate.value = "";
-  if (refs.financeCategory) refs.financeCategory.value = getDefaultFinanceExpenseCategoryCode();
-  refs.financeNote.value = "";
-  clearFinanceReceiptSelection();
+  resetFinanceFormInputs();
   state.financeExpenseFormOpen = false;
   state.financeSelectedUserId = values.transferTargetUserId || values.userId;
   refs.financeResult.textContent = formatFinanceResultMessage(resultTransaction);
@@ -5275,11 +5741,7 @@ async function addFinanceTransactionRemote() {
     const savedTransaction =
       state.financeTransactions.find((item) => item.id === payload?.transaction?.id) || payload?.transaction || null;
 
-    refs.financeAmount.value = "";
-    if (refs.financeDate) refs.financeDate.value = "";
-    if (refs.financeCategory) refs.financeCategory.value = getDefaultFinanceExpenseCategoryCode();
-    refs.financeNote.value = "";
-    clearFinanceReceiptSelection();
+    resetFinanceFormInputs();
     state.financeExpenseFormOpen = false;
     state.financeSelectedUserId = values.transferTargetUserId || values.userId;
     refs.financeResult.textContent = formatFinanceResultMessage(savedTransaction, {
@@ -5297,6 +5759,7 @@ function renderFinance() {
 
   const currentUser = getCurrentUser();
   if (!currentUser) {
+    resetFinanceTransactionEditState({ clearInputs: false });
     setFinanceVisibleRows([]);
     renderFinanceLoadMoreButton(0);
     clearFinanceReceiptSelection();
@@ -5317,6 +5780,7 @@ function renderFinance() {
   syncFinanceFormForRole();
 
   if (!hasFeaturePermission(currentUser, "finance")) {
+    resetFinanceTransactionEditState({ clearInputs: false });
     setFinanceVisibleRows([]);
     renderFinanceLoadMoreButton(0);
     clearFinanceReceiptSelection();
@@ -5341,6 +5805,7 @@ function renderFinance() {
   }
 
   resetFinanceReclassTarget();
+  resetFinanceTransactionEditState({ clearInputs: false });
   renderMemberFinance(currentUser);
   renderFinanceCategoryAdminPanel(currentUser);
   renderFinanceReclassPanel(currentUser);
@@ -6630,6 +7095,13 @@ function normalizeAllRecords() {
 
   if (state.editingReferralId && !state.referrals.some((item) => item.id === state.editingReferralId)) {
     state.editingReferralId = null;
+  }
+
+  if (
+    state.financeEditingTransactionId &&
+    !state.financeTransactions.some((item) => item.id === state.financeEditingTransactionId)
+  ) {
+    state.financeEditingTransactionId = "";
   }
 
   const visitGroups = new Set(state.visits.map((item) => `${item.customerId}|${monthOf(item.date)}`));

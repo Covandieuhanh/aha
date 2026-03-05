@@ -501,6 +501,99 @@ describe('Tài chính', () => {
     expect(textOf(byId(ctx, 'finance-table-body'))).not.toContain('Cap quy B');
   });
 
+  it('allows admin to edit and delete employee wallet transactions', () => {
+    ctx = bootApp();
+
+    login(ctx, 'admin', 'admin123');
+    createMember(ctx, {
+      fullName: 'Nhân viên sửa xoá',
+      username: '0900000105',
+      password: '123456',
+    });
+
+    updateMemberPermissions(ctx, '0900000105', {
+      customers: false,
+      customerEdit: false,
+      products: false,
+      productsEdit: false,
+      productsDelete: false,
+      visits: false,
+      visitsEdit: false,
+      visitsDelete: false,
+      referrals: false,
+      referralsEdit: false,
+      referralsDelete: false,
+      finance: true,
+      dataCleanup: false,
+      backupData: false,
+      changePassword: false,
+      reports: true,
+      reportsAll: false,
+    });
+
+    addFinanceTransaction(ctx, {
+      type: 'NHAP',
+      amount: 500000,
+      note: 'Admin nap quy cho test sua xoa',
+    });
+    addFinanceTransaction(ctx, {
+      type: 'XUAT',
+      targetUsername: '0900000105',
+      amount: 400000,
+      note: 'Cap quy cho user test sua xoa',
+    });
+
+    logout(ctx);
+    login(ctx, '0900000105', '123456');
+    addFinanceTransaction(ctx, {
+      type: 'XUAT',
+      amount: 100000,
+      note: 'Chi cu can sua',
+    });
+
+    logout(ctx);
+    login(ctx, 'admin', 'admin123');
+    openTab(ctx, 'finance');
+
+    const staffRows = [...byId(ctx, 'finance-staff-body').querySelectorAll('tr')].filter(
+      (row) => !row.querySelector('.empty-cell'),
+    );
+    const memberRow = staffRows.find((row) => row.textContent.includes('0900000105'));
+    expect(memberRow).toBeTruthy();
+    click(memberRow);
+
+    const expenseRow = getDataRows(ctx, 'finance-table-body').find((row) => row.textContent.includes('Chi cu can sua'));
+    expect(expenseRow).toBeTruthy();
+    const editBtn = expenseRow.querySelector('.finance-edit-transaction-btn');
+    const deleteBtn = expenseRow.querySelector('.finance-delete-transaction-btn');
+    expect(editBtn).toBeTruthy();
+    expect(deleteBtn).toBeTruthy();
+
+    click(editBtn);
+    expect(textOf(byId(ctx, 'finance-result'))).toContain('Đang sửa giao dịch');
+    setValue(byId(ctx, 'finance-amount'), '80000');
+    setValue(byId(ctx, 'finance-date'), '2026-02-20');
+    setValue(byId(ctx, 'finance-category'), 'OPERATIONS');
+    setValue(byId(ctx, 'finance-note'), 'Chi da sua boi admin');
+    submit(byId(ctx, 'finance-form'));
+
+    const editedHistoryText = textOf(byId(ctx, 'finance-table-body'));
+    expect(editedHistoryText).toContain('Chi da sua boi admin');
+    expect(editedHistoryText).toContain('80.000');
+    expect(editedHistoryText).toContain('Vận hành');
+
+    const editedRow = getDataRows(ctx, 'finance-table-body').find((row) => row.textContent.includes('Chi da sua boi admin'));
+    expect(editedRow).toBeTruthy();
+    click(editedRow.querySelector('.finance-delete-transaction-btn'));
+    expect(textOf(byId(ctx, 'finance-result'))).toContain('Đã xoá giao dịch tài chính');
+    expect(textOf(byId(ctx, 'finance-table-body'))).not.toContain('Chi da sua boi admin');
+
+    logout(ctx);
+    login(ctx, '0900000105', '123456');
+    openTab(ctx, 'finance');
+    expect(textOf(byId(ctx, 'finance-balance'))).toContain('400.000');
+  });
+
   it('allows admin to reclassify expense category without changing money totals', () => {
     ctx = bootApp();
 

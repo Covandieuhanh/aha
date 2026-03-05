@@ -17,6 +17,8 @@ const {
   deleteProduct,
   addReferral,
   addFinanceTransaction,
+  updateFinanceTransaction,
+  deleteFinanceTransaction,
   createFinanceExpenseCategory,
   updateFinanceExpenseCategory,
   deleteFinanceExpenseCategory,
@@ -441,16 +443,22 @@ app.get("/api/finance/integrity", requireAuth, (req, res) => {
   }
 });
 
-app.patch("/api/finance/transactions/:id", requireAuth, (_req, res) => {
-  res.status(405).json({
-    message: "Giao dịch tài chính là append-only. Không cho phép sửa giao dịch, hãy tạo giao dịch điều chỉnh.",
-  });
+app.patch("/api/finance/transactions/:id", requireAuth, (req, res) => {
+  try {
+    const payload = updateFinanceTransaction(req.user, req.params.id, req.body);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể cập nhật giao dịch tài chính.");
+  }
 });
 
-app.delete("/api/finance/transactions/:id", requireAuth, (_req, res) => {
-  res.status(405).json({
-    message: "Giao dịch tài chính là append-only. Không cho phép xoá giao dịch.",
-  });
+app.delete("/api/finance/transactions/:id", requireAuth, (req, res) => {
+  try {
+    const payload = deleteFinanceTransaction(req.user, req.params.id);
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể xoá giao dịch tài chính.");
+  }
 });
 
 app.post("/api/data-cleanup/range", requireAuth, (req, res) => {
