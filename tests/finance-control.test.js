@@ -677,5 +677,8 @@ describe('Tài chính', () => {
     expect(historyText).toContain('Nhap realtime');
     expect(historyText).toContain('2024');
     expect(historyText).toContain(String(new Date().getFullYear()));
+    const historyRows = getDataRows(ctx, 'finance-table-body');
+    expect(textOf(historyRows[0])).toContain('Nhap realtime');
+    expect(textOf(historyRows[historyRows.length - 1])).toContain('Nhap bo sung qua khu');
   });
 });

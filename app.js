@@ -1881,7 +1881,24 @@ function toFinanceTimestamp(item) {
   return 0;
 }
 
+function getFinanceTransactionDayKey(item) {
+  const raw = item?.transactionDate || item?.createdAt || item?.timestamp || "";
+  const localDay = toLocalDayKey(raw);
+  if (isValidDay(localDay)) return localDay;
+  const rawDay = dayOf(raw);
+  if (isValidDay(rawDay)) return rawDay;
+  return "";
+}
+
 function sortFinanceRowsByNewest(a, b) {
+  const dayA = getFinanceTransactionDayKey(a);
+  const dayB = getFinanceTransactionDayKey(b);
+  if (dayA && dayB && dayA !== dayB) {
+    return dayB.localeCompare(dayA);
+  }
+  if (dayA && !dayB) return -1;
+  if (!dayA && dayB) return 1;
+
   const timeDiff = toFinanceTimestamp(b) - toFinanceTimestamp(a);
   if (timeDiff !== 0) return timeDiff;
   return String(b?.createdAt || b?.timestamp || "").localeCompare(String(a?.createdAt || a?.timestamp || ""));
