@@ -1858,6 +1858,10 @@ function getFinanceSignedAmount(item) {
   return type === FINANCE_TYPE_IN ? amount : -amount;
 }
 
+function isFinanceInternalTransferEntry(item) {
+  return Boolean(item && typeof item.transferId === "string" && item.transferId.trim());
+}
+
 function getFinanceBalanceByUserId(userId) {
   if (!userId) return 0;
   return state.financeTransactions.reduce((sum, item) => {
@@ -4329,10 +4333,12 @@ function renderAdminFinanceReport(allRows, members, options = {}) {
     return true;
   });
 
-  const totalNhap = filteredRows
+  const reportRows = userId ? filteredRows : filteredRows.filter((item) => !isFinanceInternalTransferEntry(item));
+
+  const totalNhap = reportRows
     .filter((item) => normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_IN)
     .reduce((sum, item) => sum + (item.amount || 0), 0);
-  const totalXuat = filteredRows
+  const totalXuat = reportRows
     .filter((item) => normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_OUT)
     .reduce((sum, item) => sum + (item.amount || 0), 0);
   const totalTon = totalNhap - totalXuat;
@@ -4352,14 +4358,14 @@ function renderAdminFinanceReport(allRows, members, options = {}) {
     </div>
     <div class="summary-chip">
       <p>Số giao dịch</p>
-      <strong>${filteredRows.length}</strong>
+      <strong>${reportRows.length}</strong>
     </div>
   `;
 
   const grouped = new Map();
   const categoryGrouped = new Map();
   const latestReclassMap = getLatestFinanceCategoryReclassMap();
-  filteredRows.forEach((item) => {
+  reportRows.forEach((item) => {
     const dayKey = toLocalDayKey(item.createdAt || item.timestamp);
     if (!dayKey) return;
     const bucket = buildFinanceReportBucket(dayKey, filters.groupBy);
@@ -4514,11 +4520,12 @@ function renderMemberFinance(currentUser) {
 
 function renderAdminFinance() {
   const allRows = [...state.financeTransactions].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  const externalRows = allRows.filter((item) => !isFinanceInternalTransferEntry(item));
   const latestReclassMap = getLatestFinanceCategoryReclassMap();
-  const totalNhap = allRows
+  const totalNhap = externalRows
     .filter((item) => normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_IN)
     .reduce((sum, item) => sum + (item.amount || 0), 0);
-  const totalXuat = allRows
+  const totalXuat = externalRows
     .filter((item) => normalizeFinanceTransactionType(item.type) === FINANCE_TYPE_OUT)
     .reduce((sum, item) => sum + (item.amount || 0), 0);
   const totalTon = totalNhap - totalXuat;

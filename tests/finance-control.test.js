@@ -118,6 +118,63 @@ describe('Tài chính', () => {
     expect(byId(ctx, 'finance-table-body').querySelector('.delete-finance-btn')).toBeNull();
   });
 
+  it('does not double count internal transfer in admin system totals', () => {
+    ctx = bootApp();
+
+    login(ctx, 'admin', 'admin123');
+    createMember(ctx, {
+      fullName: 'Nhân viên nhận quỹ 2',
+      username: '0900000199',
+      password: '123456',
+    });
+
+    updateMemberPermissions(ctx, '0900000199', {
+      customers: false,
+      customerEdit: false,
+      products: false,
+      productsEdit: false,
+      productsDelete: false,
+      visits: false,
+      visitsEdit: false,
+      visitsDelete: false,
+      referrals: false,
+      referralsEdit: false,
+      referralsDelete: false,
+      finance: true,
+      dataCleanup: false,
+      backupData: false,
+      changePassword: false,
+      reports: true,
+      reportsAll: false,
+    });
+
+    const topupMsg = addFinanceTransaction(ctx, {
+      type: 'NHAP',
+      amount: 1000000,
+      note: 'Admin nap nguon',
+    });
+    expect(topupMsg).toContain('Đã ghi nhận NHẬP');
+
+    const transferMsg = addFinanceTransaction(ctx, {
+      type: 'XUAT',
+      targetUsername: '0900000199',
+      amount: 300000,
+      note: 'Admin chuyen noi bo',
+    });
+    expect(transferMsg).toContain('Đã ghi nhận XUẤT');
+
+    openTab(ctx, 'finance');
+    const balanceText = textOf(byId(ctx, 'finance-balance'));
+    expect(balanceText).toContain('NHẬP 1.000.000');
+    expect(balanceText).toContain('XUẤT 0');
+    expect(balanceText).toContain('TỒN 1.000.000');
+
+    const reportSummaryText = textOf(byId(ctx, 'finance-report-summary'));
+    expect(reportSummaryText).toContain('1.000.000');
+    expect(reportSummaryText).toContain('0');
+    expect(reportSummaryText).toContain('Số giao dịch 1');
+  });
+
   it('allows delegated finance funding permission for non-admin accounts', () => {
     ctx = bootApp();
 
