@@ -152,6 +152,7 @@ Hệ thống đã có cơ chế sao lưu tự động trong `server mode`:
 - Sao lưu ngay khi dữ liệu thay đổi (theo cơ chế gom nhịp để tránh ghi quá dày).
 - Sao lưu hằng ngày theo giờ cấu hình.
 - Có thể bấm `Sao lưu dữ liệu ngay bây giờ` trong giao diện (khi tài khoản có quyền `Sao lưu dữ liệu`).
+- Có thể phục hồi dữ liệu trực tiếp từ file JSON trong tab `Quản trị dữ liệu` (quyền `Sao lưu dữ liệu`).
 
 Cấu hình trong `.env`:
 
@@ -178,6 +179,14 @@ Bạn vẫn có thể tạo bản sao lưu nhanh tại máy chủ:
 ```bash
 make backup
 ```
+
+### Phục hồi dữ liệu online từ file JSON
+
+1. Đăng nhập tài khoản có quyền `Sao lưu dữ liệu`.
+2. Mở tab `Quản trị dữ liệu`.
+3. Ở khối `Sao lưu dữ liệu an toàn`, chọn file JSON backup.
+4. Bấm `Phục hồi dữ liệu từ tệp` và xác nhận.
+5. Hệ thống sẽ thay thế dữ liệu hiện tại trên server bằng dữ liệu trong file.
 
 ## Chạy không dùng Docker (phương án phụ)
 

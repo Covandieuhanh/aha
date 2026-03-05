@@ -42,6 +42,7 @@ const {
   getBootstrapForUser,
   hasFeaturePermission,
   purgeDataByDateRange,
+  restoreDataSnapshot,
   safeUser,
   updateCustomer,
   updateMemberPermissions,
@@ -559,6 +560,18 @@ app.post("/api/backup/run", requireAuth, async (req, res) => {
     res.status(202).json({ ok: true, status });
   } catch (error) {
     sendApiError(res, error, "Không thể yêu cầu sao lưu dữ liệu ngay.");
+  }
+});
+
+app.post("/api/backup/restore", requireAuth, (req, res) => {
+  try {
+    const payload = restoreDataSnapshot(req.user, req.body);
+    if (!payload.requesterStillExists) {
+      clearSessionCookie(res);
+    }
+    res.json(payload);
+  } catch (error) {
+    sendApiError(res, error, "Không thể phục hồi dữ liệu từ tệp sao lưu.");
   }
 });
 

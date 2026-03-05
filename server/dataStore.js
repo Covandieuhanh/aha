@@ -1084,6 +1084,46 @@ function createInitialState() {
   };
 }
 
+function extractStateCollections(rawState) {
+  const parsed = rawState && typeof rawState === "object" ? rawState : {};
+  return {
+    customers: Array.isArray(parsed.customers) ? parsed.customers : [],
+    products: Array.isArray(parsed.products) ? parsed.products : [],
+    visits: Array.isArray(parsed.visits) ? parsed.visits : [],
+    referrals: Array.isArray(parsed.referrals) ? parsed.referrals : [],
+    inventoryTransactions: Array.isArray(parsed.inventoryTransactions) ? parsed.inventoryTransactions : [],
+    financeTransactions: Array.isArray(parsed.financeTransactions) ? parsed.financeTransactions : [],
+    financeExpenseCategories: Array.isArray(parsed.financeExpenseCategories) ? parsed.financeExpenseCategories : [],
+    financeCategoryReclassLogs: Array.isArray(parsed.financeCategoryReclassLogs) ? parsed.financeCategoryReclassLogs : [],
+    systemAuditLogs: Array.isArray(parsed.systemAuditLogs)
+      ? parsed.systemAuditLogs
+      : Array.isArray(parsed.auditLogs)
+        ? parsed.auditLogs
+        : [],
+    users: Array.isArray(parsed.users) ? parsed.users : [],
+    pushSubscriptions: Array.isArray(parsed.pushSubscriptions) ? parsed.pushSubscriptions : [],
+  };
+}
+
+function summarizeState(snapshotState) {
+  const safeState = snapshotState && typeof snapshotState === "object" ? snapshotState : {};
+  return {
+    customers: Array.isArray(safeState.customers) ? safeState.customers.length : 0,
+    products: Array.isArray(safeState.products) ? safeState.products.length : 0,
+    visits: Array.isArray(safeState.visits) ? safeState.visits.length : 0,
+    referrals: Array.isArray(safeState.referrals) ? safeState.referrals.length : 0,
+    inventoryTransactions: Array.isArray(safeState.inventoryTransactions) ? safeState.inventoryTransactions.length : 0,
+    financeTransactions: Array.isArray(safeState.financeTransactions) ? safeState.financeTransactions.length : 0,
+    financeExpenseCategories: Array.isArray(safeState.financeExpenseCategories) ? safeState.financeExpenseCategories.length : 0,
+    financeCategoryReclassLogs: Array.isArray(safeState.financeCategoryReclassLogs)
+      ? safeState.financeCategoryReclassLogs.length
+      : 0,
+    systemAuditLogs: Array.isArray(safeState.systemAuditLogs) ? safeState.systemAuditLogs.length : 0,
+    users: Array.isArray(safeState.users) ? safeState.users.length : 0,
+    pushSubscriptions: Array.isArray(safeState.pushSubscriptions) ? safeState.pushSubscriptions.length : 0,
+  };
+}
+
 function readStateFromDisk() {
   ensureDataDirectory();
 
@@ -1097,21 +1137,8 @@ function readStateFromDisk() {
 
     const parsed = JSON.parse(raw);
     return {
-      customers: Array.isArray(parsed.customers) ? parsed.customers : [],
-      products: Array.isArray(parsed.products) ? parsed.products : [],
-      visits: Array.isArray(parsed.visits) ? parsed.visits : [],
-      referrals: Array.isArray(parsed.referrals) ? parsed.referrals : [],
-      inventoryTransactions: Array.isArray(parsed.inventoryTransactions) ? parsed.inventoryTransactions : [],
-      financeTransactions: Array.isArray(parsed.financeTransactions) ? parsed.financeTransactions : [],
-      financeExpenseCategories: Array.isArray(parsed.financeExpenseCategories) ? parsed.financeExpenseCategories : [],
-      financeCategoryReclassLogs: Array.isArray(parsed.financeCategoryReclassLogs) ? parsed.financeCategoryReclassLogs : [],
-      systemAuditLogs: Array.isArray(parsed.systemAuditLogs)
-        ? parsed.systemAuditLogs
-        : Array.isArray(parsed.auditLogs)
-          ? parsed.auditLogs
-          : [],
-      users: Array.isArray(parsed.users) ? parsed.users : [],
-      pushSubscriptions: Array.isArray(parsed.pushSubscriptions) ? parsed.pushSubscriptions : [],
+      ...createInitialState(),
+      ...extractStateCollections(parsed),
     };
   } catch (error) {
     return createInitialState();
@@ -2922,6 +2949,49 @@ function reclassifyFinanceTransactionCategory(requestUser, transactionId, input)
   };
 }
 
+function restoreDataSnapshot(requestUser, input) {
+  assertFeaturePermission(requestUser, "backupData");
+
+  const rootPayload = input && typeof input === "object" && !Array.isArray(input) ? input : null;
+  if (!rootPayload) {
+    throw httpError(400, "Dữ liệu phục hồi không hợp lệ.");
+  }
+
+  const rawSnapshotCandidate =
+    rootPayload.snapshot && typeof rootPayload.snapshot === "object" && !Array.isArray(rootPayload.snapshot)
+      ? rootPayload.snapshot
+      : rootPayload;
+  if (!rawSnapshotCandidate || typeof rawSnapshotCandidate !== "object" || Array.isArray(rawSnapshotCandidate)) {
+    throw httpError(400, "Dữ liệu phục hồi không hợp lệ.");
+  }
+
+  const previousSummary = summarizeState(state);
+  state = {
+    ...createInitialState(),
+    ...extractStateCollections(rawSnapshotCandidate),
+  };
+  normalizeAllRecords(state);
+  ensureAdminAccount(state);
+
+  const nowIso = new Date().toISOString();
+  appendSystemAuditLog({
+    domain: "system",
+    action: "DATA_RESTORED",
+    actorId: requestUser.id,
+    createdAt: nowIso,
+    details: {
+      previousSummary,
+      snapshotWrapped: Boolean(rootPayload.snapshot),
+    },
+  });
+  persist();
+
+  return {
+    summary: summarizeState(state),
+    requesterStillExists: Boolean(findUserById(requestUser.id)),
+  };
+}
+
 function purgeDataByDateRange(requestUser, input) {
   assertFeaturePermission(requestUser, "dataCleanup");
 
@@ -3192,6 +3262,7 @@ module.exports = {
   updateFinanceExpenseCategory,
   deleteFinanceExpenseCategory,
   reclassifyFinanceTransactionCategory,
+  restoreDataSnapshot,
   purgeDataByDateRange,
   addVisit,
   updateVisit,

@@ -338,6 +338,9 @@ const refs = {
   maintenanceResult: document.getElementById("maintenance-result"),
   backupNowBtn: document.getElementById("backup-now-btn"),
   backupStatus: document.getElementById("backup-status"),
+  backupRestoreFile: document.getElementById("backup-restore-file"),
+  backupRestoreBtn: document.getElementById("backup-restore-btn"),
+  backupRestoreResult: document.getElementById("backup-restore-result"),
 
   changePasswordForm: document.getElementById("change-password-form"),
   currentPassword: document.getElementById("current-password"),
@@ -716,6 +719,11 @@ function bindEvents() {
   refs.backupNowBtn.addEventListener("click", () => {
     void triggerBackupNow();
   });
+  if (refs.backupRestoreBtn) {
+    refs.backupRestoreBtn.addEventListener("click", () => {
+      void restoreBackupSnapshot();
+    });
+  }
   refs.changePasswordForm.addEventListener("submit", (event) => {
     event.preventDefault();
     changePassword();
@@ -1541,6 +1549,94 @@ async function triggerBackupNow() {
     await refreshBackupStatus();
   } catch (error) {
     handleRemoteActionError(error, refs.backupStatus, "Không thể yêu cầu sao lưu dữ liệu ngay.");
+  }
+}
+
+function buildRestoreSummaryText(summary) {
+  const safeSummary = summary && typeof summary === "object" ? summary : {};
+  return `Đã phục hồi dữ liệu: ${Number(safeSummary.users || 0)} tài khoản, ${Number(
+    safeSummary.financeTransactions || 0,
+  )} giao dịch tài chính, ${Number(safeSummary.inventoryTransactions || 0)} giao dịch kho, ${Number(
+    safeSummary.customers || 0,
+  )} khách hàng, ${Number(safeSummary.products || 0)} sản phẩm, ${Number(safeSummary.visits || 0)} giao dịch tích điểm, ${Number(
+    safeSummary.referrals || 0,
+  )} giao dịch giới thiệu.`;
+}
+
+async function parseBackupSnapshotFile(file) {
+  if (!file || typeof file.text !== "function") {
+    throw new Error("Không đọc được tệp sao lưu.");
+  }
+
+  const rawText = await file.text();
+  if (!rawText.trim()) {
+    throw new Error("Tệp sao lưu đang trống.");
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    throw new Error("Tệp sao lưu không phải JSON hợp lệ.");
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Tệp sao lưu phải là JSON dạng object.");
+  }
+
+  if (parsed.snapshot && typeof parsed.snapshot === "object" && !Array.isArray(parsed.snapshot)) {
+    return parsed.snapshot;
+  }
+
+  return parsed;
+}
+
+async function restoreBackupSnapshot() {
+  if (!ensureFeature("backupData", refs.backupRestoreResult)) return;
+
+  if (!runtime.remoteMode) {
+    refs.backupRestoreResult.textContent = "Chức năng phục hồi chỉ hỗ trợ khi chạy ở chế độ online (remote).";
+    return;
+  }
+
+  const file = refs.backupRestoreFile?.files?.[0];
+  if (!file) {
+    refs.backupRestoreResult.textContent = "Vui lòng chọn tệp sao lưu JSON trước khi phục hồi.";
+    return;
+  }
+
+  const accepted = confirmAction(
+    "Bạn có chắc muốn phục hồi dữ liệu từ tệp đã chọn? Toàn bộ dữ liệu hiện tại trên máy chủ sẽ bị thay thế.",
+  );
+  if (!accepted) return;
+
+  refs.backupRestoreResult.textContent = "Đang phục hồi dữ liệu từ tệp sao lưu...";
+
+  try {
+    const snapshot = await parseBackupSnapshotFile(file);
+    const payload = await apiRequest("/backup/restore", {
+      method: "POST",
+      body: { snapshot },
+    });
+
+    refs.backupRestoreFile.value = "";
+    const summaryText = buildRestoreSummaryText(payload?.summary);
+
+    if (payload?.requesterStillExists === false) {
+      clearState();
+      state.activeTab = "";
+      stopRemoteAutoSync();
+      refs.loginMessage.textContent =
+        `${summaryText} Phiên đăng nhập hiện tại đã được đăng xuất vì tài khoản không còn tồn tại trong bản phục hồi.`;
+      renderAuthState();
+      return;
+    }
+
+    await syncFromServer({ preserveTab: true, silent: true });
+    refs.backupRestoreResult.textContent = summaryText;
+    await refreshBackupStatus();
+  } catch (error) {
+    handleRemoteActionError(error, refs.backupRestoreResult, "Không thể phục hồi dữ liệu từ tệp sao lưu.");
   }
 }
 
