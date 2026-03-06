@@ -2966,9 +2966,20 @@ function restoreDataSnapshot(requestUser, input) {
   }
 
   const previousSummary = summarizeState(state);
+  const rawCollections = extractStateCollections(rawSnapshotCandidate);
+  const restoredFinanceTransactions = Array.isArray(rawCollections.financeTransactions)
+    ? rawCollections.financeTransactions.map((item) => ({
+        ...item,
+        integrityPrevHash: "",
+        integrityHash: "",
+        integrityVersion: 1,
+        integrityValid: true,
+      }))
+    : [];
   state = {
     ...createInitialState(),
-    ...extractStateCollections(rawSnapshotCandidate),
+    ...rawCollections,
+    financeTransactions: restoredFinanceTransactions,
   };
   normalizeAllRecords(state);
   ensureAdminAccount(state);
@@ -2982,6 +2993,7 @@ function restoreDataSnapshot(requestUser, input) {
     details: {
       previousSummary,
       snapshotWrapped: Boolean(rootPayload.snapshot),
+      financeLedgerResigned: true,
     },
   });
   persist();
