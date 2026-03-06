@@ -1632,7 +1632,13 @@ async function restoreBackupSnapshot() {
       return;
     }
 
-    await syncFromServer({ preserveTab: true, silent: true });
+    const currentTab = state.activeTab;
+    const bootstrapPayload = await apiRequest("/bootstrap");
+    applyBootstrap(bootstrapPayload);
+    if (currentTab) {
+      state.activeTab = currentTab;
+    }
+    renderAuthState();
     refs.backupRestoreResult.textContent = summaryText;
     await refreshBackupStatus();
   } catch (error) {
