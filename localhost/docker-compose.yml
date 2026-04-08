@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: data_aha_local_db
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-data_aha_local}"
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-DataAhaLocal!2026}"
+      POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=md5"
+      TZ: "Asia/Ho_Chi_Minh"
+    ports:
+      - "15432:5432"
+    volumes:
+      - data_aha_pg_data:/var/lib/postgresql/data
+      - ./docker/sql/init-schema.pgsql:/docker-entrypoint-initdb.d/01-init-schema.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    image: data-aha-local-web:latest
+    build:
+      context: ./docker/web
+      dockerfile: Dockerfile
+    container_name: data_aha_local_web
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TZ: "Asia/Ho_Chi_Minh"
+      DATAAHA_CONNECTION_STRING: "${DATAAHA_CONNECTION_STRING:-}"
+      POSTGRES_HOST: "${POSTGRES_HOST:-db}"
+      POSTGRES_PORT: "${POSTGRES_PORT:-5432}"
+      POSTGRES_DB: "${POSTGRES_DB:-data_aha_local}"
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-DataAhaLocal!2026}"
+    ports:
+      - "8088:80"
+      - "8443:443"
+    volumes:
+      - ./:/app
+      - ./certs:/etc/nginx/certs:ro
+    restart: unless-stopped
+
+volumes:
+  data_aha_pg_data:

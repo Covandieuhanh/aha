@@ -2,7 +2,10 @@ node_modules/
 dist/
 coverage/
 .env
+localhost/.env
+localhost/certs/
 .DS_Store
 backups/
 backups-local/
+/release/
 /Users/duccuongtran/Documents/data-aha-backups/
